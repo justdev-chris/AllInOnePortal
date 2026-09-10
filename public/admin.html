@@ -9,15 +9,25 @@
   * { box-sizing: border-box; }
   body { margin: 0; font: 15px/1.4 system-ui, sans-serif;
     background: #0f1115; color: #e6e6e6; padding: 24px; }
-  h1 { margin: 0 0 16px; font-size: 20px; }
+  h1 { margin: 0 0 8px; font-size: 20px; }
+  h2 { margin: 24px 0 10px; font-size: 15px; color: #8b8f99;
+    text-transform: uppercase; letter-spacing: .06em; }
   a { color: #7aa2f7; }
+  .topbar { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+  .topbar .slow { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .topbar select, .topbar input {
+    background: #1a1d24; border: 1px solid #2a2e37; color: inherit;
+    padding: 6px 10px; border-radius: 6px; font: inherit; font-size: 13px;
+  }
   table { width: 100%; border-collapse: collapse; background: #1a1d24;
     border: 1px solid #2a2e37; border-radius: 8px; overflow: hidden; }
-  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #23262d; font-size: 14px; }
+  th, td { padding: 10px 12px; text-align: left;
+    border-bottom: 1px solid #23262d; font-size: 14px; vertical-align: middle; }
   th { color: #8b8f99; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
   tr:last-child td { border-bottom: 0; }
   .role-admin { color: #e0af68; font-weight: 600; }
   .banned { color: #f7768e; }
+  .muted { color: #e0af68; }
   .ok { color: #9ece6a; }
   button { background: #2a2e37; border: 0; color: #e6e6e6;
     padding: 6px 10px; border-radius: 6px; cursor: pointer;
@@ -27,27 +37,62 @@
   button.danger:hover { background: #5f2830; }
   button.promote { background: #2d3a23; color: #9ece6a; }
   button.promote:hover { background: #3a4a2c; }
-  #msg { color: #8b8f99; margin-top: 12px; font-size: 13px; }
+  button.warn { background: #3d3219; color: #e0af68; }
+  button.warn:hover { background: #4f4120; }
+  #msg { color: #8b8f99; margin-top: 12px; font-size: 13px; min-height: 18px; }
   #denied { display: none; background: #1a1d24; border: 1px solid #2a2e37;
     border-radius: 8px; padding: 20px; text-align: center; }
-  .swatch {
-    display: inline-block; width: 12px; height: 12px; border-radius: 50%;
-    border: 1px solid #2a2e37; vertical-align: middle; margin-right: 6px;
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+    border: 1px solid #2a2e37; vertical-align: middle; margin-right: 6px; }
+  .swatch.rainbow { background: linear-gradient(90deg,#ff6b6b,#f7b731,#9ece6a,#4fd1c5,#7aa2f7,#bb9af7); }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 6px;
+    border-radius: 10px; background: #2a2e37; color: #cfd3dc; margin-left: 6px; }
+  .muted-note { color: #e0af68; font-size: 12px; margin-left: 6px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid #23262d; }
+  .tab { background: transparent; border: 0; border-bottom: 2px solid transparent;
+    padding: 8px 14px; color: #8b8f99; cursor: pointer; font: inherit; font-size: 14px;
+    margin: 0; border-radius: 0; }
+  .tab:hover { background: #1a1d24; color: #e6e6e6; }
+  .tab.active { color: #e6e6e6; border-bottom-color: #5865f2; }
+  .audit-filters { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .audit-filters input, .audit-filters select {
+    background: #1a1d24; border: 1px solid #2a2e37; color: inherit;
+    padding: 6px 10px; border-radius: 6px; font: inherit; font-size: 13px;
   }
-  .swatch.rainbow {
-    background: linear-gradient(90deg,#ff6b6b,#f7b731,#9ece6a,#4fd1c5,#7aa2f7,#bb9af7);
+  .audit-filters button { background: #5865f2; color: #fff; }
+  .audit-filters button:hover { background: #4752c4; }
+  .action-pill {
+    display: inline-block; font-size: 11px; padding: 2px 8px;
+    border-radius: 10px; background: #2a2e37; color: #cfd3dc;
   }
-  .tag {
-    display: inline-block; font-size: 11px; padding: 1px 6px;
-    border-radius: 10px; background: #2a2e37; color: #cfd3dc; margin-left: 6px;
-  }
-  .muted { color: #565b66; font-size: 12px; }
+  .action-pill.ban    { background: #4a1f27; color: #f7768e; }
+  .action-pill.unban  { background: #2d3a23; color: #9ece6a; }
+  .action-pill.mute   { background: #3d3219; color: #e0af68; }
+  .action-pill.unmute { background: #2d3a23; color: #9ece6a; }
+  .action-pill.promote { background: #2d3a23; color: #9ece6a; }
+  .action-pill.demote { background: #3a2d1f; color: #e0af68; }
+  .action-pill.slowmode { background: #2a3040; color: #7dcfff; }
+  .action-pill.delete-message { background: #3a2d1f; color: #e0af68; }
 </style>
 </head>
 <body>
 
-<h1>Admin panel</h1>
-<p><a href="/">← back to chat</a></p>
+<div class="topbar">
+  <h1>Admin panel</h1>
+  <a href="/">← back to chat</a>
+  <div class="slow">
+    <label style="color:#8b8f99;font-size:13px">Slow mode</label>
+    <select id="slowmode">
+      <option value="0">off</option>
+      <option value="3">3s</option>
+      <option value="5">5s</option>
+      <option value="10">10s</option>
+      <option value="30">30s</option>
+      <option value="60">1m</option>
+      <option value="300">5m</option>
+    </select>
+  </div>
+</div>
 
 <div id="denied">
   <p>You're not an admin, or you're not signed in.</p>
@@ -55,25 +100,79 @@
 </div>
 
 <div id="panel" style="display:none">
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Username</th>
-        <th>Profile</th>
-        <th>Role</th>
-        <th>Status</th>
-        <th>Created</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody id="rows"></tbody>
-  </table>
+  <div class="tabs">
+    <button class="tab active" data-tab="users">Users</button>
+    <button class="tab" data-tab="audit">Audit log</button>
+  </div>
+
+  <div id="tab-users">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Username</th>
+          <th>Profile</th>
+          <th>Role</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <div id="tab-audit" style="display:none">
+    <div class="audit-filters">
+      <input id="f-actor"  placeholder="actor" />
+      <input id="f-target" placeholder="target" />
+      <select id="f-action">
+        <option value="">any action</option>
+        <option>ban</option>
+        <option>unban</option>
+        <option>mute</option>
+        <option>unmute</option>
+        <option>promote</option>
+        <option>demote</option>
+        <option>slowmode</option>
+        <option>delete-message</option>
+      </select>
+      <button id="f-apply">apply</button>
+      <button id="f-reset">reset</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Actor</th>
+          <th>Action</th>
+          <th>Target</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody id="audit-rows"></tbody>
+    </table>
+  </div>
+
   <div id="msg"></div>
 </div>
 
 <script>
 const token = localStorage.getItem('token');
+const slowmodeSel = document.getElementById('slowmode');
+const rowsEl    = document.getElementById('rows');
+const auditRows = document.getElementById('audit-rows');
+const msgEl     = document.getElementById('msg');
+
+function setMsg(t) {
+  msgEl.textContent = t;
+  setTimeout(() => { if (msgEl.textContent === t) msgEl.textContent = ''; }, 3000);
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
 
 if (!token) {
   document.getElementById('denied').style.display = 'block';
@@ -84,47 +183,77 @@ if (!token) {
       if (user.role !== 'admin') throw new Error('not admin');
       document.getElementById('panel').style.display = 'block';
       loadUsers();
-      setInterval(loadUsers, 15000);   // live-ish refresh
+      setInterval(loadUsers, 15000);
+      wireTabs();
+      wireSlowmode();
+      wireAuditFilters();
     })
     .catch(() => { document.getElementById('denied').style.display = 'block'; });
 }
 
-const rowsEl = document.getElementById('rows');
-const msgEl  = document.getElementById('msg');
-
-function setMsg(t) {
-  msgEl.textContent = t;
-  setTimeout(() => { if (msgEl.textContent === t) msgEl.textContent = ''; }, 3000);
+// ---------- tabs ----------
+function wireTabs() {
+  document.querySelectorAll('.tab').forEach(t => {
+    t.onclick = () => {
+      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      const name = t.dataset.tab;
+      document.getElementById('tab-users').style.display = name === 'users' ? '' : 'none';
+      document.getElementById('tab-audit').style.display = name === 'audit' ? '' : 'none';
+      if (name === 'audit') loadAudit();
+    };
+  });
 }
 
+// ---------- slowmode ----------
+function wireSlowmode() {
+  slowmodeSel.onchange = async () => {
+    const seconds = Number(slowmodeSel.value);
+    const r = await fetch('/api/admin/slowmode', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
+      body: JSON.stringify({ seconds }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { setMsg(data.error || 'Failed'); return; }
+    setMsg(seconds === 0 ? 'Slow mode off' : `Slow mode: ${seconds}s`);
+  };
+}
+
+// ---------- users ----------
 async function loadUsers() {
   const r = await fetch('/api/admin/users', { headers: { authorization: 'Bearer ' + token } });
   if (!r.ok) { setMsg('Failed to load users'); return; }
-  const { users } = await r.json();
+  const { users, slowmode } = await r.json();
+  slowmodeSel.value = String(slowmode || 0);
   render(users);
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  }[c]));
 }
 
 function profileCell(u) {
   const parts = [];
-  if (u.color === 'rainbow') {
-    parts.push('<span class="swatch rainbow" title="rainbow"></span>');
-  } else if (u.color) {
-    parts.push(`<span class="swatch" style="background:${escapeHtml(u.color)}" title="${escapeHtml(u.color)}"></span>`);
-  } else {
-    parts.push('<span class="swatch" style="background:#2a2e37" title="default"></span>');
-  }
+  if (u.color === 'rainbow') parts.push('<span class="swatch rainbow"></span>');
+  else if (u.color) parts.push(`<span class="swatch" style="background:${escapeHtml(u.color)}"></span>`);
+  else parts.push('<span class="swatch" style="background:#2a2e37"></span>');
   if (u.tag) {
     const bg = u.tag_bg ? ` style="background:${escapeHtml(u.tag_bg)}"` : '';
     parts.push(`<span class="tag"${bg}>${escapeHtml(u.tag)}</span>`);
   }
-  if (!u.color && !u.tag) parts.push('<span class="muted">—</span>');
   return parts.join('');
+}
+
+function statusCell(u) {
+  const parts = [];
+  if (u.banned) parts.push('<span class="banned">banned</span>');
+  else parts.push('<span class="ok">active</span>');
+
+  if (u.muted_until) {
+    if (u.muted_until === -1) parts.push('<span class="muted-note">muted (permanent)</span>');
+    else if (u.muted_until > Date.now()) {
+      const mins = Math.ceil((u.muted_until - Date.now()) / 60000);
+      parts.push(`<span class="muted-note">muted (${mins}m)</span>`);
+    }
+  }
+  return parts.join(' ');
 }
 
 function render(users) {
@@ -136,34 +265,78 @@ function render(users) {
       <td>${escapeHtml(u.username)}</td>
       <td>${profileCell(u)}</td>
       <td class="${u.role === 'admin' ? 'role-admin' : ''}">${u.role}</td>
-      <td class="${u.banned ? 'banned' : 'ok'}">${u.banned ? 'banned' : 'active'}</td>
+      <td>${statusCell(u)}</td>
       <td>${new Date(u.created_at).toLocaleString()}</td>
       <td></td>
     `;
-
     const actions = tr.lastElementChild;
 
+    // ban
     const banBtn = document.createElement('button');
     banBtn.className = u.banned ? '' : 'danger';
     banBtn.textContent = u.banned ? 'unban' : 'ban';
-    banBtn.onclick = () => act('/api/admin/ban', { id: u.id, banned: u.banned ? 0 : 1 });
+    banBtn.onclick = () => withReason(u.banned ? 'unban' : 'ban', u, (reason) =>
+      act('/api/admin/ban', { id: u.id, banned: u.banned ? 0 : 1, reason })
+    );
     actions.appendChild(banBtn);
 
+    // role
     const roleBtn = document.createElement('button');
     if (u.role === 'admin') {
       roleBtn.textContent = 'demote';
-      roleBtn.onclick = () => act('/api/admin/promote', { id: u.id, role: 'user' });
+      roleBtn.onclick = () => withReason('demote', u, (reason) =>
+        act('/api/admin/promote', { id: u.id, role: 'user', reason })
+      );
     } else {
       roleBtn.className = 'promote';
       roleBtn.textContent = 'promote';
-      roleBtn.onclick = () => act('/api/admin/promote', { id: u.id, role: 'admin' });
+      roleBtn.onclick = () => withReason('promote', u, (reason) =>
+        act('/api/admin/promote', { id: u.id, role: 'admin', reason })
+      );
     }
     actions.appendChild(roleBtn);
+
+    // mute
+    const isMuted = u.muted_until && (u.muted_until === -1 || u.muted_until > Date.now());
+    const muteBtn = document.createElement('button');
+    muteBtn.className = isMuted ? 'warn' : '';
+    muteBtn.textContent = isMuted ? 'unmute' : 'mute';
+    muteBtn.onclick = () => {
+      if (isMuted) {
+        withReason('unmute', u, (reason) =>
+          act('/api/admin/mute', { id: u.id, duration: -1, reason })
+        );
+      } else {
+        openMutePrompt(u);
+      }
+    };
+    actions.appendChild(muteBtn);
 
     rowsEl.appendChild(tr);
   });
 }
 
+// ---------- reason prompts ----------
+function withReason(action, target, cb) {
+  const reason = prompt(`Reason for ${action} on ${target.username}? (optional)`) || '';
+  cb(reason);
+}
+
+function openMutePrompt(u) {
+  const choice = prompt(
+    `Mute ${u.username} for how long?\n` +
+    `1 = 5 min\n2 = 1 hour\n3 = 1 day\n4 = 1 week\n5 = permanent`,
+    '2'
+  );
+  if (!choice) return;
+  const map = { '1': 300, '2': 3600, '3': 86400, '4': 604800, '5': 0 };
+  const duration = map[choice.trim()];
+  if (duration === undefined) return;
+  const reason = prompt(`Reason? (optional)`) || '';
+  act('/api/admin/mute', { id: u.id, duration, reason });
+}
+
+// ---------- actions ----------
 async function act(route, body) {
   const r = await fetch(route, {
     method: 'POST',
@@ -174,6 +347,52 @@ async function act(route, body) {
   if (!r.ok) { setMsg(data.error || 'Failed'); return; }
   setMsg('Done');
   loadUsers();
+}
+
+// ---------- audit ----------
+function wireAuditFilters() {
+  document.getElementById('f-apply').onclick = loadAudit;
+  document.getElementById('f-reset').onclick = () => {
+    document.getElementById('f-actor').value = '';
+    document.getElementById('f-target').value = '';
+    document.getElementById('f-action').value = '';
+    loadAudit();
+  };
+}
+
+async function loadAudit() {
+  const q = new URLSearchParams();
+  const a = document.getElementById('f-actor').value.trim();
+  const t = document.getElementById('f-target').value.trim();
+  const ac = document.getElementById('f-action').value;
+  if (a) q.set('actor', a);
+  if (t) q.set('target', t);
+  if (ac) q.set('action', ac);
+  q.set('limit', '200');
+
+  const r = await fetch('/api/admin/audit?' + q.toString(), {
+    headers: { authorization: 'Bearer ' + token },
+  });
+  if (!r.ok) { setMsg('Failed to load audit log'); return; }
+  const { entries } = await r.json();
+  auditRows.innerHTML = '';
+  if (!entries.length) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan="5" style="color:#8b8f99;text-align:center">no entries</td>`;
+    auditRows.appendChild(tr);
+    return;
+  }
+  entries.forEach(e => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${new Date(e.ts).toLocaleString()}</td>
+      <td>${escapeHtml(e.actor_username)}</td>
+      <td><span class="action-pill ${escapeHtml(e.action)}">${escapeHtml(e.action)}</span></td>
+      <td>${e.target_username ? escapeHtml(e.target_username) : '<span style="color:#565b66">—</span>'}</td>
+      <td>${e.reason ? escapeHtml(e.reason) : '<span style="color:#565b66">—</span>'}</td>
+    `;
+    auditRows.appendChild(tr);
+  });
 }
 </script>
 </body>
