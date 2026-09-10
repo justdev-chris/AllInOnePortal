@@ -4,13 +4,11 @@ const crypto = require('crypto');
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const Database = require('better-sqlite3');
-const { WebSocketServer, WebSocket } = require('ws');
+const { attachSocketServer } = require('./socket');
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
 const PORT = process.env.PORT || 3000;
-
 const ADMIN_USERNAME = (process.env.ADMIN_USERNAME || '').trim();
 
 app.use(express.json({ limit: '64kb' }));
@@ -53,7 +51,6 @@ db.exec(`
   );
 `);
 
-// ---------- lightweight migrations ----------
 function addColumnIfMissing(table, column, definition) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all();
   if (!cols.some(c => c.name === column)) {
@@ -75,60 +72,9 @@ function ensureAdminUser() {
 }
 ensureAdminUser();
 
-// ==================== SOCKET REGISTRY ====================
-const sockets = new Map();
-const userSockets = new Map();
-
-function attach(ws, user) {
-  const info = {
-    userId: user.id,
-    username: user.username,
-    role: user.role,
-    color: user.color || '',
-    tag: user.tag || '',
-    tag_bg: user.tag_bg || '',
-  };
-  sockets.set(ws, info);
-  if (!userSockets.has(user.id)) userSockets.set(user.id, new Set());
-  userSockets.get(user.id).add(ws);
-}
-function detach(ws) {
-  const info = sockets.get(ws);
-  sockets.delete(ws);
-  if (info) {
-    const set = userSockets.get(info.userId);
-    if (set) { set.delete(ws); if (!set.size) userSockets.delete(info.userId); }
-  }
-}
-function sendTo(userId, payload) {
-  const set = userSockets.get(userId);
-  if (!set) return;
-  const data = JSON.stringify(payload);
-  for (const ws of set) if (ws.readyState === WebSocket.OPEN) ws.send(data);
-}
-function broadcast(payload, exceptWs) {
-  const data = JSON.stringify(payload);
-  for (const ws of sockets.keys()) {
-    if (ws !== exceptWs && ws.readyState === WebSocket.OPEN) ws.send(data);
-  }
-}
-function onlineUsers() {
-  const byId = new Map();
-  for (const info of sockets.values()) {
-    byId.set(info.userId, {
-      id: info.userId,
-      username: info.username,
-      role: info.role,
-      color: info.color,
-      tag: info.tag,
-      tag_bg: info.tag_bg,
-    });
-  }
-  return [...byId.values()];
-}
-function broadcastUserList() {
-  broadcast({ type: 'users', users: onlineUsers() });
-}
+// ==================== SOCKET SERVER ====================
+const { broadcast, sendTo, onlineUsers, broadcastUserList, userSockets, sockets } =
+  attachSocketServer(server, db);
 
 // ==================== AUTH ====================
 function makeToken() { return crypto.randomBytes(32).toString('hex'); }
@@ -198,8 +144,12 @@ app.get('/api/me', (req, res) => {
   const full = db.prepare('SELECT color, tag, tag_bg FROM users WHERE id = ?').get(u.id);
   res.json({
     user: {
-      id: u.id, username: u.username, role: u.role,
-      color: full?.color || '', tag: full?.tag || '', tag_bg: full?.tag_bg || '',
+      id: u.id,
+      username: u.username,
+      role: u.role,
+      color: full?.color || '',
+      tag: full?.tag || '',
+      tag_bg: full?.tag_bg || '',
     },
   });
 });
@@ -256,7 +206,7 @@ app.post('/api/profile', (req, res) => {
   res.json({ ok: true, profile: { color, tag, tag_bg } });
 });
 
-// ==================== ADMIN API ====================
+// ==================== ADMIN ====================
 function requireAdmin(req, res, next) {
   const u = sessionUser(req);
   if (!u) return res.status(401).json({ error: 'Not signed in' });
@@ -321,152 +271,5 @@ app.post('/api/admin/delete-message', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-// ==================== WEBSOCKET ====================
-wss.on('connection', (ws, req) => {
-  const url = new URL(req.url, 'http://x');
-  const token = url.searchParams.get('token') || '';
-  const user = db.prepare(`
-    SELECT u.id, u.username, u.role, u.banned, u.color, u.tag, u.tag_bg
-    FROM sessions s JOIN users u ON u.id = s.user_id
-    WHERE s.token = ?
-  `).get(token);
-
-  if (!user || user.banned) {
-    ws.send(JSON.stringify({ type: 'auth-error', text: 'Not authenticated' }));
-    return ws.close(4001, 'unauthorized');
-  }
-
-  attach(ws, user);
-
-  const history = db.prepare(`
-    SELECT id, user_id, username, text, ts, edited_at, deleted
-    FROM messages ORDER BY id DESC LIMIT 100
-  `).all().reverse();
-
-  const dms = db.prepare(`
-    SELECT id, from_id, to_id, text, ts, edited_at, deleted
-    FROM dms WHERE from_id = ? OR to_id = ?
-    ORDER BY id DESC LIMIT 200
-  `).all(user.id, user.id).reverse();
-
-  ws.send(JSON.stringify({
-    type: 'hello',
-    you: {
-      id: user.id, username: user.username, role: user.role,
-      color: user.color || '', tag: user.tag || '', tag_bg: user.tag_bg || '',
-    },
-    history, dms,
-    users: onlineUsers(),
-  }));
-
-  broadcast({ type: 'system', text: `${user.username} joined`, ts: Date.now() }, ws);
-  broadcastUserList();
-
-  ws.on('message', (raw) => {
-    let msg;
-    try { msg = JSON.parse(raw); } catch { return; }
-    const me = sockets.get(ws);
-    if (!me) return;
-
-    if (msg.type === 'chat' && typeof msg.text === 'string') {
-      const text = msg.text.trim().slice(0, 2000);
-      if (!text) return;
-      const now = Date.now();
-      const info = db.prepare(
-        'INSERT INTO messages (user_id, username, text, ts) VALUES (?, ?, ?, ?)'
-      ).run(me.userId, me.username, text, now);
-      broadcast({
-        type: 'msg', id: info.lastInsertRowid,
-        user_id: me.userId, username: me.username,
-        text, ts: now, edited_at: null, deleted: 0,
-      });
-      return;
-    }
-
-    if (msg.type === 'dm' && msg.to && typeof msg.text === 'string') {
-      const text = msg.text.trim().slice(0, 2000);
-      if (!text) return;
-      const to = Number(msg.to);
-      const target = db.prepare('SELECT id, username, banned FROM users WHERE id = ?').get(to);
-      if (!target || target.banned)
-        return ws.send(JSON.stringify({ type: 'error', text: 'Cannot DM that user' }));
-
-      const now = Date.now();
-      const info = db.prepare(
-        'INSERT INTO dms (from_id, to_id, text, ts) VALUES (?, ?, ?, ?)'
-      ).run(me.userId, to, text, now);
-      const payload = {
-        type: 'dm', id: info.lastInsertRowid,
-        from_id: me.userId, to_id: to, text, ts: now,
-        edited_at: null, deleted: 0,
-      };
-      sendTo(me.userId, payload);
-      sendTo(to, payload);
-      return;
-    }
-
-    if (msg.type === 'edit' && Number.isInteger(msg.id) && typeof msg.text === 'string') {
-      const text = msg.text.trim().slice(0, 2000);
-      if (!text) return;
-      const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(msg.id);
-      if (!row || row.deleted) return;
-      if (row.user_id !== me.userId && me.role !== 'admin')
-        return ws.send(JSON.stringify({ type: 'error', text: 'Not yours to edit' }));
-      const now = Date.now();
-      db.prepare('UPDATE messages SET text = ?, edited_at = ? WHERE id = ?').run(text, now, msg.id);
-      broadcast({ type: 'msg-edited', id: msg.id, text, edited_at: now });
-      return;
-    }
-
-    if (msg.type === 'delete' && Number.isInteger(msg.id)) {
-      const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(msg.id);
-      if (!row || row.deleted) return;
-      if (row.user_id !== me.userId && me.role !== 'admin')
-        return ws.send(JSON.stringify({ type: 'error', text: 'Not yours to delete' }));
-      db.prepare('UPDATE messages SET deleted = 1 WHERE id = ?').run(msg.id);
-      broadcast({ type: 'msg-deleted', id: msg.id });
-      return;
-    }
-
-    if (msg.type === 'dm-edit' && Number.isInteger(msg.id) && typeof msg.text === 'string') {
-      const text = msg.text.trim().slice(0, 2000);
-      if (!text) return;
-      const row = db.prepare('SELECT * FROM dms WHERE id = ?').get(msg.id);
-      if (!row || row.deleted || row.from_id !== me.userId) return;
-      const now = Date.now();
-      db.prepare('UPDATE dms SET text = ?, edited_at = ? WHERE id = ?').run(text, now, msg.id);
-      const payload = { type: 'dm-edited', id: msg.id, text, edited_at: now };
-      sendTo(row.from_id, payload);
-      sendTo(row.to_id, payload);
-      return;
-    }
-
-    if (msg.type === 'dm-delete' && Number.isInteger(msg.id)) {
-      const row = db.prepare('SELECT * FROM dms WHERE id = ?').get(msg.id);
-      if (!row || row.deleted) return;
-      if (row.from_id !== me.userId && me.role !== 'admin') return;
-      db.prepare('UPDATE dms SET deleted = 1 WHERE id = ?').run(msg.id);
-      const payload = { type: 'dm-deleted', id: msg.id };
-      sendTo(row.from_id, payload);
-      sendTo(row.to_id, payload);
-      return;
-    }
-
-    if (msg.type === 'typing') {
-      broadcast({ type: 'typing', user_id: me.userId, username: me.username }, ws);
-    }
-  });
-
-  ws.on('close', () => {
-    const me = sockets.get(ws);
-    detach(ws);
-    if (me) {
-      broadcast({ type: 'system', text: `${me.username} left`, ts: Date.now() });
-      broadcastUserList();
-    }
-  });
-
-  ws.on('error', () => {});
-});
-
+// ==================== LISTEN ====================
 server.listen(PORT, () => console.log(`Chatroom on http://localhost:${PORT}`));
