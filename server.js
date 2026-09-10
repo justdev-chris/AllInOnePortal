@@ -49,6 +49,27 @@ db.exec(`
     edited_at INTEGER,
     deleted INTEGER NOT NULL DEFAULT 0
   );
+  CREATE TABLE IF NOT EXISTS reactions (
+    message_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    emoji TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    PRIMARY KEY (message_id, user_id, emoji)
+  );
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_id INTEGER NOT NULL,
+    actor_username TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target_id INTEGER,
+    target_username TEXT,
+    reason TEXT,
+    ts INTEGER NOT NULL
+  );
 `);
 
 function addColumnIfMissing(table, column, definition) {
@@ -58,9 +79,39 @@ function addColumnIfMissing(table, column, definition) {
     console.log(`migrated: added ${table}.${column}`);
   }
 }
-addColumnIfMissing('users', 'color',  "TEXT NOT NULL DEFAULT ''");
-addColumnIfMissing('users', 'tag',    "TEXT NOT NULL DEFAULT ''");
-addColumnIfMissing('users', 'tag_bg', "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing('users', 'color',        "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing('users', 'tag',          "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing('users', 'tag_bg',       "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing('users', 'muted_until',  "INTEGER NOT NULL DEFAULT 0");
+addColumnIfMissing('dms',   'read_at',      "INTEGER");
+
+// settings helpers
+function getSetting(key, fallback) {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  return row ? row.value : fallback;
+}
+function setSetting(key, value) {
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(key, String(value));
+}
+
+// defaults
+if (getSetting('slowmode_seconds', null) === null) setSetting('slowmode_seconds', '0');
+
+function audit(actor, action, target, reason) {
+  db.prepare(`
+    INSERT INTO audit_log (actor_id, actor_username, action, target_id, target_username, reason, ts)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    actor.id,
+    actor.username,
+    action,
+    target?.id ?? null,
+    target?.username ?? null,
+    reason || null,
+    Date.now()
+  );
+}
 
 function ensureAdminUser() {
   if (!ADMIN_USERNAME) return;
@@ -73,8 +124,11 @@ function ensureAdminUser() {
 ensureAdminUser();
 
 // ==================== SOCKET SERVER ====================
-const { broadcast, sendTo, onlineUsers, broadcastUserList, userSockets, sockets } =
-  attachSocketServer(server, db);
+const socketApi = attachSocketServer(server, db);
+const { broadcast, sendTo, onlineUsers, broadcastUserList, userSockets, sockets } = socketApi;
+
+// make helpers available to socket.js if it needs them
+socketApi.getSetting = getSetting;
 
 // ==================== AUTH ====================
 function makeToken() { return crypto.randomBytes(32).toString('hex'); }
@@ -84,7 +138,7 @@ function sessionUser(req) {
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
   if (!token) return null;
   return db.prepare(`
-    SELECT s.token, u.id, u.username, u.role, u.banned
+    SELECT s.token, u.id, u.username, u.role, u.banned, u.muted_until
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token = ?
   `).get(token);
@@ -141,17 +195,28 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/me', (req, res) => {
   const u = sessionUser(req);
   if (!u) return res.status(401).json({ error: 'Not signed in' });
-  const full = db.prepare('SELECT color, tag, tag_bg FROM users WHERE id = ?').get(u.id);
+  const full = db.prepare('SELECT color, tag, tag_bg, muted_until FROM users WHERE id = ?').get(u.id);
   res.json({
     user: {
-      id: u.id,
-      username: u.username,
-      role: u.role,
-      color: full?.color || '',
-      tag: full?.tag || '',
-      tag_bg: full?.tag_bg || '',
+      id: u.id, username: u.username, role: u.role,
+      color: full?.color || '', tag: full?.tag || '', tag_bg: full?.tag_bg || '',
+      muted_until: full?.muted_until || 0,
     },
   });
+});
+
+// ==================== DM READ ====================
+app.post('/api/dm/read', (req, res) => {
+  const u = sessionUser(req);
+  if (!u) return res.status(401).json({ error: 'Not signed in' });
+  const peer = Number(req.body.peer);
+  if (!peer) return res.status(400).json({ error: 'peer required' });
+  db.prepare(`
+    UPDATE dms SET read_at = ?
+    WHERE to_id = ? AND from_id = ? AND read_at IS NULL
+  `).run(Date.now(), u.id, peer);
+  sendTo(peer, { type: 'dm-read-by', by: u.id });
+  res.json({ ok: true });
 });
 
 // ==================== PROFILE ====================
@@ -186,7 +251,6 @@ app.post('/api/profile', (req, res) => {
   db.prepare('UPDATE users SET color = ?, tag = ?, tag_bg = ? WHERE id = ?')
     .run(color, tag, tag_bg, u.id);
 
-  // update cached socket info
   for (const info of sockets.values()) {
     if (info.userId === u.id) {
       info.color = color;
@@ -195,14 +259,8 @@ app.post('/api/profile', (req, res) => {
     }
   }
 
-  broadcast({
-    type: 'profile-updated',
-    user_id: u.id,
-    username: u.username,
-    color, tag, tag_bg,
-  });
+  broadcast({ type: 'profile-updated', user_id: u.id, username: u.username, color, tag, tag_bg });
   broadcastUserList();
-
   res.json({ ok: true, profile: { color, tag, tag_bg } });
 });
 
@@ -217,14 +275,15 @@ function requireAdmin(req, res, next) {
 
 app.get('/api/admin/users', requireAdmin, (req, res) => {
   const rows = db.prepare(
-    'SELECT id, username, role, banned, created_at, color, tag, tag_bg FROM users ORDER BY id'
+    'SELECT id, username, role, banned, created_at, color, tag, tag_bg, muted_until FROM users ORDER BY id'
   ).all();
-  res.json({ users: rows });
+  res.json({ users: rows, slowmode: Number(getSetting('slowmode_seconds', '0')) });
 });
 
 app.post('/api/admin/ban', requireAdmin, (req, res) => {
   const id = Number(req.body.id);
   const banned = req.body.banned ? 1 : 0;
+  const reason = String(req.body.reason || '').trim().slice(0, 200);
   if (id === req.admin.id) return res.status(400).json({ error: 'Cannot ban yourself' });
   const target = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   if (!target) return res.status(404).json({ error: 'No such user' });
@@ -235,6 +294,7 @@ app.post('/api/admin/ban', requireAdmin, (req, res) => {
     const set = userSockets.get(id);
     if (set) for (const ws of set) { try { ws.close(4003, 'banned'); } catch {} }
   }
+  audit(req.admin, banned ? 'ban' : 'unban', target, reason);
   broadcast({ type: 'system', text: `${target.username} was ${banned ? 'banned' : 'unbanned'}`, ts: Date.now() });
   res.json({ ok: true });
 });
@@ -242,6 +302,7 @@ app.post('/api/admin/ban', requireAdmin, (req, res) => {
 app.post('/api/admin/promote', requireAdmin, (req, res) => {
   const id = Number(req.body.id);
   const role = req.body.role === 'admin' ? 'admin' : 'user';
+  const reason = String(req.body.reason || '').trim().slice(0, 200);
   if (id === req.admin.id) return res.status(400).json({ error: 'Cannot change your own role' });
   const target = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   if (!target) return res.status(404).json({ error: 'No such user' });
@@ -249,14 +310,47 @@ app.post('/api/admin/promote', requireAdmin, (req, res) => {
   for (const info of sockets.values()) {
     if (info.userId === id) info.role = role;
   }
+  audit(req.admin, role === 'admin' ? 'promote' : 'demote', target, reason);
   broadcast({ type: 'system', text: `${target.username} is now ${role}`, ts: Date.now() });
   broadcastUserList();
   res.json({ ok: true });
 });
 
+app.post('/api/admin/mute', requireAdmin, (req, res) => {
+  const id = Number(req.body.id);
+  const duration = Number(req.body.duration || 0);   // seconds; 0 = permanent, -1 = unmute
+  const reason = String(req.body.reason || '').trim().slice(0, 200);
+  if (id === req.admin.id) return res.status(400).json({ error: 'Cannot mute yourself' });
+  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  if (!target) return res.status(404).json({ error: 'No such user' });
+
+  let until = 0;
+  let action = 'unmute';
+  if (duration > 0) {
+    until = Date.now() + duration * 1000;
+    action = 'mute';
+  } else if (duration === 0) {
+    until = -1;   // sentinel: permanent mute
+    action = 'mute';
+  } else {
+    until = 0;    // unmute
+    action = 'unmute';
+  }
+
+  db.prepare('UPDATE users SET muted_until = ? WHERE id = ?').run(until, id);
+  for (const info of sockets.values()) {
+    if (info.userId === id) info.muted_until = until;
+  }
+  audit(req.admin, action, target, reason);
+  sendTo(id, { type: 'mute-state', muted_until: until });
+  broadcast({ type: 'system', text: `${target.username} was ${action === 'mute' ? 'muted' : 'unmuted'}`, ts: Date.now() });
+  res.json({ ok: true, muted_until: until });
+});
+
 app.post('/api/admin/delete-message', requireAdmin, (req, res) => {
   const id = Number(req.body.id);
   const scope = req.body.scope === 'dm' ? 'dm' : 'public';
+  const reason = String(req.body.reason || '').trim().slice(0, 200);
   const table = scope === 'dm' ? 'dms' : 'messages';
   const row = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
   if (!row) return res.status(404).json({ error: 'No such message' });
@@ -268,7 +362,34 @@ app.post('/api/admin/delete-message', requireAdmin, (req, res) => {
   } else {
     broadcast({ type: 'msg-deleted', id });
   }
+  audit(req.admin, 'delete-message', null, reason || `msg #${id}`);
   res.json({ ok: true });
+});
+
+app.post('/api/admin/slowmode', requireAdmin, (req, res) => {
+  const seconds = Math.max(0, Math.min(3600, Number(req.body.seconds) || 0));
+  setSetting('slowmode_seconds', seconds);
+  audit(req.admin, 'slowmode', null, `${seconds}s`);
+  broadcast({ type: 'slowmode', seconds });
+  res.json({ ok: true, seconds });
+});
+
+app.get('/api/admin/audit', requireAdmin, (req, res) => {
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+  const action = req.query.action ? String(req.query.action) : null;
+  const actor  = req.query.actor  ? String(req.query.actor)  : null;
+  const target = req.query.target ? String(req.query.target) : null;
+
+  let sql = 'SELECT * FROM audit_log WHERE 1=1';
+  const params = [];
+  if (action) { sql += ' AND action = ?'; params.push(action); }
+  if (actor)  { sql += ' AND actor_username = ?'; params.push(actor); }
+  if (target) { sql += ' AND target_username = ?'; params.push(target); }
+  sql += ' ORDER BY id DESC LIMIT ?';
+  params.push(limit);
+
+  const rows = db.prepare(sql).all(...params);
+  res.json({ entries: rows });
 });
 
 // ==================== LISTEN ====================
