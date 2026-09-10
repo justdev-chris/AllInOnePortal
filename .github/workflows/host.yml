@@ -1,0 +1,98 @@
+name: Host Chatroom
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 */5 * * *'
+
+concurrency:
+  group: chatroom-host
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install express@4.19.2 ws@8.18.0
+
+      - name: Install cloudflared
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            -o /usr/local/bin/cloudflared
+          chmod +x /usr/local/bin/cloudflared
+          cloudflared --version
+
+      - name: Start chat server
+        run: |
+          nohup node server.js > server.log 2>&1 &
+          echo $! > server.pid
+          for i in {1..20}; do
+            curl -sf http://localhost:3000 >/dev/null && break
+            sleep 1
+          done
+
+      - name: Start Cloudflare quick tunnel
+        run: |
+          nohup cloudflared tunnel --no-autoupdate --url http://localhost:3000 \
+            > tunnel.log 2>&1 &
+          echo $! > tunnel.pid
+
+          URL=""
+          for i in {1..30}; do
+            URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' tunnel.log | head -1)
+            [ -n "$URL" ] && break
+            sleep 1
+          done
+
+          if [ -z "$URL" ]; then
+            echo "failed to obtain tunnel URL"
+            cat tunnel.log
+            exit 1
+          fi
+
+          echo "::notice title=Chatroom URL::$URL"
+          echo "### Chatroom live at: $URL" >> $GITHUB_STEP_SUMMARY
+          echo "$URL" > .url_latest
+
+      - name: Publish URL to repo
+        run: |
+          URL=$(cat .url_latest)
+          rm -f .url_latest
+
+          mkdir -p .url
+          echo "$URL" > .url/latest.txt
+          echo "$(date -u +%FT%TZ) $URL" >> .url/history.txt
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .url
+          git commit -m "chore: update tunnel URL [skip ci]" || echo "no change"
+          git push
+
+      - name: Keep alive
+        run: |
+          tail -f server.log tunnel.log &
+          sleep 340m || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          [ -f tunnel.pid ] && kill $(cat tunnel.pid) 2>/dev/null || true
+          [ -f server.pid ] && kill $(cat server.pid) 2>/dev/null || true
+          echo "---- server.log ----"; cat server.log 2>/dev/null || true
+          echo "---- tunnel.log ----"; cat tunnel.log 2>/dev/null || true
