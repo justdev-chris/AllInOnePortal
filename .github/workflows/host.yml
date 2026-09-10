@@ -28,7 +28,7 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm install express@4.19.2 ws@8.18.0
+        run: npm install express@4.19.2 ws@8.18.0 bcryptjs@2.4.3 better-sqlite3@11.3.0
 
       - name: Install cloudflared
         run: |
@@ -38,6 +38,8 @@ jobs:
           cloudflared --version
 
       - name: Start chat server
+        env:
+          ADMIN_USERNAME: justdev-chris
         run: |
           nohup node server.js > server.log 2>&1 &
           echo $! > server.pid
@@ -86,8 +88,30 @@ jobs:
 
       - name: Keep alive
         run: |
+          (
+            while true; do
+              sleep 900
+              if [ -f chat.db ]; then
+                git add chat.db chat.db-shm chat.db-wal 2>/dev/null || true
+                git diff --cached --quiet || git commit -m "chore: snapshot chat.db [skip ci]"
+                git push || true
+              fi
+            done
+          ) &
+          SNAP_PID=$!
+
           tail -f server.log tunnel.log &
+          TAIL_PID=$!
+
           sleep 340m || true
+
+          kill $SNAP_PID $TAIL_PID 2>/dev/null || true
+
+          if [ -f chat.db ]; then
+            git add chat.db chat.db-shm chat.db-wal 2>/dev/null || true
+            git diff --cached --quiet || git commit -m "chore: final chat.db snapshot [skip ci]"
+            git push || true
+          fi
 
       - name: Cleanup
         if: always()
