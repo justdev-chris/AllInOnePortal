@@ -53,6 +53,18 @@ db.exec(`
   );
 `);
 
+// ---------- lightweight migrations ----------
+function addColumnIfMissing(table, column, definition) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!cols.some(c => c.name === column)) {
+    db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+    console.log(`migrated: added ${table}.${column}`);
+  }
+}
+addColumnIfMissing('users', 'color',  "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing('users', 'tag',    "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing('users', 'tag_bg', "TEXT NOT NULL DEFAULT ''");
+
 function ensureAdminUser() {
   if (!ADMIN_USERNAME) return;
   const u = db.prepare('SELECT id, role FROM users WHERE username = ?').get(ADMIN_USERNAME);
@@ -68,7 +80,14 @@ const sockets = new Map();
 const userSockets = new Map();
 
 function attach(ws, user) {
-  const info = { userId: user.id, username: user.username, role: user.role };
+  const info = {
+    userId: user.id,
+    username: user.username,
+    role: user.role,
+    color: user.color || '',
+    tag: user.tag || '',
+    tag_bg: user.tag_bg || '',
+  };
   sockets.set(ws, info);
   if (!userSockets.has(user.id)) userSockets.set(user.id, new Set());
   userSockets.get(user.id).add(ws);
@@ -96,7 +115,14 @@ function broadcast(payload, exceptWs) {
 function onlineUsers() {
   const byId = new Map();
   for (const info of sockets.values()) {
-    byId.set(info.userId, { id: info.userId, username: info.username, role: info.role });
+    byId.set(info.userId, {
+      id: info.userId,
+      username: info.username,
+      role: info.role,
+      color: info.color,
+      tag: info.tag,
+      tag_bg: info.tag_bg,
+    });
   }
   return [...byId.values()];
 }
@@ -169,7 +195,65 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/me', (req, res) => {
   const u = sessionUser(req);
   if (!u) return res.status(401).json({ error: 'Not signed in' });
-  res.json({ user: { id: u.id, username: u.username, role: u.role } });
+  const full = db.prepare('SELECT color, tag, tag_bg FROM users WHERE id = ?').get(u.id);
+  res.json({
+    user: {
+      id: u.id, username: u.username, role: u.role,
+      color: full?.color || '', tag: full?.tag || '', tag_bg: full?.tag_bg || '',
+    },
+  });
+});
+
+// ==================== PROFILE ====================
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+const PALETTE = ['#7aa2f7', '#9ece6a', '#e0af68', '#f7768e', '#bb9af7', '#7dcfff', '#ff9e64'];
+const ALLOWED_TAGS = /^[\p{L}\p{N}\p{Emoji}_\- .]{0,16}$/u;
+const RESERVED_TAGS = ['mod', 'admin', 'owner', 'staff'];
+
+app.post('/api/profile', (req, res) => {
+  const u = sessionUser(req);
+  if (!u) return res.status(401).json({ error: 'Not signed in' });
+
+  let color  = String(req.body.color  ?? '').trim().toLowerCase();
+  let tag    = String(req.body.tag    ?? '').trim();
+  let tag_bg = String(req.body.tag_bg ?? '').trim().toLowerCase();
+
+  if (color === 'rainbow') {
+    if (u.role !== 'admin') return res.status(403).json({ error: 'Rainbow is admin-only' });
+  } else if (color) {
+    if (!HEX_RE.test(color)) return res.status(400).json({ error: 'Bad color' });
+    if (u.role !== 'admin' && !PALETTE.includes(color)) {
+      return res.status(403).json({ error: 'That color is admin-only' });
+    }
+  }
+
+  if (!ALLOWED_TAGS.test(tag)) return res.status(400).json({ error: 'Bad tag' });
+  if (u.role !== 'admin' && RESERVED_TAGS.includes(tag.toLowerCase())) {
+    return res.status(403).json({ error: 'That tag is reserved' });
+  }
+  if (tag_bg && !HEX_RE.test(tag_bg)) return res.status(400).json({ error: 'Bad tag background' });
+
+  db.prepare('UPDATE users SET color = ?, tag = ?, tag_bg = ? WHERE id = ?')
+    .run(color, tag, tag_bg, u.id);
+
+  // update cached socket info
+  for (const info of sockets.values()) {
+    if (info.userId === u.id) {
+      info.color = color;
+      info.tag = tag;
+      info.tag_bg = tag_bg;
+    }
+  }
+
+  broadcast({
+    type: 'profile-updated',
+    user_id: u.id,
+    username: u.username,
+    color, tag, tag_bg,
+  });
+  broadcastUserList();
+
+  res.json({ ok: true, profile: { color, tag, tag_bg } });
 });
 
 // ==================== ADMIN API ====================
@@ -183,7 +267,7 @@ function requireAdmin(req, res, next) {
 
 app.get('/api/admin/users', requireAdmin, (req, res) => {
   const rows = db.prepare(
-    'SELECT id, username, role, banned, created_at FROM users ORDER BY id'
+    'SELECT id, username, role, banned, created_at, color, tag, tag_bg FROM users ORDER BY id'
   ).all();
   res.json({ users: rows });
 });
@@ -212,7 +296,11 @@ app.post('/api/admin/promote', requireAdmin, (req, res) => {
   const target = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   if (!target) return res.status(404).json({ error: 'No such user' });
   db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, id);
+  for (const info of sockets.values()) {
+    if (info.userId === id) info.role = role;
+  }
   broadcast({ type: 'system', text: `${target.username} is now ${role}`, ts: Date.now() });
+  broadcastUserList();
   res.json({ ok: true });
 });
 
@@ -238,7 +326,7 @@ wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://x');
   const token = url.searchParams.get('token') || '';
   const user = db.prepare(`
-    SELECT u.id, u.username, u.role, u.banned
+    SELECT u.id, u.username, u.role, u.banned, u.color, u.tag, u.tag_bg
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token = ?
   `).get(token);
@@ -263,7 +351,10 @@ wss.on('connection', (ws, req) => {
 
   ws.send(JSON.stringify({
     type: 'hello',
-    you: { id: user.id, username: user.username, role: user.role },
+    you: {
+      id: user.id, username: user.username, role: user.role,
+      color: user.color || '', tag: user.tag || '', tag_bg: user.tag_bg || '',
+    },
     history, dms,
     users: onlineUsers(),
   }));
