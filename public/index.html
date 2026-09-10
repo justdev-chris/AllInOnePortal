@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Chatroom</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 15px/1.4 system-ui, sans-serif;
+    background: #0f1115; color: #e6e6e6;
+    display: grid; grid-template-columns: 1fr 200px;
+    height: 100vh;
+  }
+  #main { display: flex; flex-direction: column; min-width: 0; }
+  header {
+    padding: 12px 16px; border-bottom: 1px solid #23262d;
+    display: flex; gap: 12px; align-items: center;
+  }
+  #log {
+    flex: 1; overflow-y: auto; padding: 16px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .msg { max-width: 70ch; }
+  .msg .name { color: #7aa2f7; font-weight: 600; }
+  .msg .time { color: #565b66; font-size: 12px; margin-left: 6px; }
+  .system { color: #8b8f99; font-style: italic; font-size: 13px; }
+  form {
+    display: flex; gap: 8px; padding: 12px 16px;
+    border-top: 1px solid #23262d;
+  }
+  form input[type=text] {
+    flex: 1; background: #1a1d24; border: 1px solid #2a2e37;
+    color: inherit; padding: 10px 12px; border-radius: 8px;
+  }
+  button {
+    background: #5865f2; border: 0; color: white;
+    padding: 10px 16px; border-radius: 8px; cursor: pointer;
+  }
+  button:hover { background: #4752c4; }
+  aside {
+    border-left: 1px solid #23262d; padding: 16px;
+    overflow-y: auto;
+  }
+  aside h3 { margin: 0 0 12px; font-size: 13px; color: #8b8f99; text-transform: uppercase; }
+  aside ul { padding: 0; margin: 0; }
+  aside li { list-style: none; padding: 4px 0; color: #cfd3dc; }
+  #typing { height: 20px; padding: 0 16px 4px; color: #8b8f99; font-size: 13px; }
+
+  /* join overlay */
+  #joinOverlay {
+    position: fixed; inset: 0;
+    background: rgba(15,17,21,0.97);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 10;
+  }
+  #joinCard {
+    background: #1a1d24; border: 1px solid #2a2e37;
+    border-radius: 12px; padding: 28px; width: 320px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  #joinCard h1 { margin: 0; font-size: 20px; }
+  #joinCard input {
+    background: #0f1115; border: 1px solid #2a2e37; color: inherit;
+    padding: 10px 12px; border-radius: 8px; font-size: 15px;
+  }
+  #joinError { color: #f7768e; font-size: 13px; min-height: 18px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="joinOverlay">
+  <form id="joinCard">
+    <h1>Join the chat</h1>
+    <input id="joinName" placeholder="Enter a username" maxlength="24" autofocus autocomplete="off" />
+    <div id="joinError"></div>
+    <button type="submit">Join</button>
+  </form>
+</div>
+
+<div id="main" class="hidden">
+  <header>
+    <strong>Chatroom</strong>
+    <span id="whoami" style="color:#8b8f99;font-size:13px"></span>
+    <span id="status" style="color:#8b8f99;font-size:13px;margin-left:auto">connecting…</span>
+  </header>
+
+  <div id="log"></div>
+  <div id="typing"></div>
+
+  <form id="form">
+    <input id="textInput" type="text" placeholder="Type a message…" autocomplete="off" />
+    <button>Send</button>
+  </form>
+</div>
+
+<aside id="sidebar" class="hidden">
+  <h3>Online</h3>
+  <ul id="users"></ul>
+</aside>
+
+<script>
+const joinOverlay = document.getElementById('joinOverlay');
+const joinCard    = document.getElementById('joinCard');
+const joinName    = document.getElementById('joinName');
+const joinError   = document.getElementById('joinError');
+
+const mainEl    = document.getElementById('main');
+const sidebarEl = document.getElementById('sidebar');
+const whoamiEl  = document.getElementById('whoami');
+const logEl     = document.getElementById('log');
+const formEl    = document.getElementById('form');
+const textEl    = document.getElementById('textInput');
+const usersEl   = document.getElementById('users');
+const statusEl  = document.getElementById('status');
+const typingEl  = document.getElementById('typing');
+
+let ws;
+let me = null;
+let joined = false;
+let reconnectDelay = 1000;
+const typingTimers = new Map();
+let lastTypingSent = 0;
+
+// prefill saved name
+const saved = localStorage.getItem('chatName');
+if (saved) joinName.value = saved;
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}`);
+
+  ws.onopen = () => {
+    reconnectDelay = 1000;
+    statusEl.textContent = 'online';
+    // auto-rejoin if we had a name
+    if (me) {
+      ws.send(JSON.stringify({ type: 'join', name: me.name }));
+    }
+  };
+
+  ws.onclose = () => {
+    statusEl.textContent = 'reconnecting…';
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+  };
+
+  ws.onerror = () => {};
+
+  ws.onmessage = handleMessage;
+}
+
+function handleMessage(e) {
+  let m;
+  try { m = JSON.parse(e.data); } catch { return; }
+
+  if (m.type === 'welcome') {
+    me = m.you;
+    joined = true;
+    localStorage.setItem('chatName', me.name);
+    whoamiEl.textContent = `signed in as ${me.name}`;
+    joinOverlay.classList.add('hidden');
+    mainEl.classList.remove('hidden');
+    sidebarEl.classList.remove('hidden');
+
+    logEl.innerHTML = '';
+    m.history.forEach(render);
+    renderUsers(m.users);
+    scroll();
+    textEl.focus();
+    return;
+  }
+
+  if (m.type === 'error') {
+    joinError.textContent = m.text;
+    return;
+  }
+
+  if (m.type === 'chat' || m.type === 'system') { render(m); scroll(); return; }
+  if (m.type === 'users') { renderUsers(m.users); return; }
+
+  if (m.type === 'typing') {
+    typingEl.textContent = `${m.name} is typing…`;
+    clearTimeout(typingTimers.get(m.id));
+    typingTimers.set(m.id, setTimeout(() => { typingEl.textContent = ''; }, 1500));
+  }
+}
+
+function render(m) {
+  const div = document.createElement('div');
+
+  if (m.type === 'system') {
+    div.className = 'system';
+    div.textContent = m.text;
+  } else {
+    div.className = 'msg';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = m.name;
+    const time = document.createElement('span');
+    time.className = 'time';
+    time.textContent = new Date(m.ts).toLocaleTimeString();
+    const text = document.createElement('span');
+    text.textContent = ' ' + m.text;
+    div.append(name, time, text);
+  }
+  logEl.appendChild(div);
+}
+
+function renderUsers(users) {
+  usersEl.innerHTML = '';
+  users.forEach(u => {
+    const li = document.createElement('li');
+    li.textContent = u.id === me?.id ? `${u.name} (you)` : u.name;
+    usersEl.appendChild(li);
+  });
+}
+
+function scroll() { logEl.scrollTop = logEl.scrollHeight; }
+
+// ---- join ----
+joinCard.onsubmit = (e) => {
+  e.preventDefault();
+  const name = joinName.value.trim();
+  if (!name) { joinError.textContent = 'Please enter a name.'; return; }
+  joinError.textContent = '';
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    joinError.textContent = 'Still connecting… try again.';
+    return;
+  }
+  ws.send(JSON.stringify({ type: 'join', name }));
+};
+
+// ---- send ----
+formEl.onsubmit = (e) => {
+  e.preventDefault();
+  if (!joined) return;
+  const text = textEl.value.trim();
+  if (!text || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: 'chat', text }));
+  textEl.value = '';
+};
+
+textEl.addEventListener('input', () => {
+  if (!joined) return;
+  const now = Date.now();
+  if (now - lastTypingSent < 800) return;
+  lastTypingSent = now;
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'typing' }));
+});
+
+connect();
+</script>
+</body>
+</html>
