@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Admin — Chatroom</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.4 system-ui, sans-serif;
+    background: #0f1115; color: #e6e6e6; padding: 24px; }
+  h1 { margin: 0 0 16px; font-size: 20px; }
+  a { color: #7aa2f7; }
+  table { width: 100%; border-collapse: collapse; background: #1a1d24;
+    border: 1px solid #2a2e37; border-radius: 8px; overflow: hidden; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #23262d; font-size: 14px; }
+  th { color: #8b8f99; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  tr:last-child td { border-bottom: 0; }
+  .role-admin { color: #e0af68; font-weight: 600; }
+  .banned { color: #f7768e; }
+  .ok { color: #9ece6a; }
+  button { background: #2a2e37; border: 0; color: #e6e6e6;
+    padding: 6px 10px; border-radius: 6px; cursor: pointer;
+    font: inherit; font-size: 13px; margin-right: 4px; }
+  button:hover { background: #3a3f4a; }
+  button.danger { background: #4a1f27; color: #f7768e; }
+  button.danger:hover { background: #5f2830; }
+  button.promote { background: #2d3a23; color: #9ece6a; }
+  button.promote:hover { background: #3a4a2c; }
+  #msg { color: #8b8f99; margin-top: 12px; font-size: 13px; }
+  #denied { display: none; background: #1a1d24; border: 1px solid #2a2e37;
+    border-radius: 8px; padding: 20px; text-align: center; }
+  .swatch {
+    display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+    border: 1px solid #2a2e37; vertical-align: middle; margin-right: 6px;
+  }
+  .swatch.rainbow {
+    background: linear-gradient(90deg,#ff6b6b,#f7b731,#9ece6a,#4fd1c5,#7aa2f7,#bb9af7);
+  }
+  .tag {
+    display: inline-block; font-size: 11px; padding: 1px 6px;
+    border-radius: 10px; background: #2a2e37; color: #cfd3dc; margin-left: 6px;
+  }
+  .muted { color: #565b66; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>Admin panel</h1>
+<p><a href="/">← back to chat</a></p>
+
+<div id="denied">
+  <p>You're not an admin, or you're not signed in.</p>
+  <p><a href="/">Go to login</a></p>
+</div>
+
+<div id="panel" style="display:none">
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Username</th>
+        <th>Profile</th>
+        <th>Role</th>
+        <th>Status</th>
+        <th>Created</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div id="msg"></div>
+</div>
+
+<script>
+const token = localStorage.getItem('token');
+
+if (!token) {
+  document.getElementById('denied').style.display = 'block';
+} else {
+  fetch('/api/me', { headers: { authorization: 'Bearer ' + token } })
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(({ user }) => {
+      if (user.role !== 'admin') throw new Error('not admin');
+      document.getElementById('panel').style.display = 'block';
+      loadUsers();
+      setInterval(loadUsers, 15000);   // live-ish refresh
+    })
+    .catch(() => { document.getElementById('denied').style.display = 'block'; });
+}
+
+const rowsEl = document.getElementById('rows');
+const msgEl  = document.getElementById('msg');
+
+function setMsg(t) {
+  msgEl.textContent = t;
+  setTimeout(() => { if (msgEl.textContent === t) msgEl.textContent = ''; }, 3000);
+}
+
+async function loadUsers() {
+  const r = await fetch('/api/admin/users', { headers: { authorization: 'Bearer ' + token } });
+  if (!r.ok) { setMsg('Failed to load users'); return; }
+  const { users } = await r.json();
+  render(users);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+function profileCell(u) {
+  const parts = [];
+  if (u.color === 'rainbow') {
+    parts.push('<span class="swatch rainbow" title="rainbow"></span>');
+  } else if (u.color) {
+    parts.push(`<span class="swatch" style="background:${escapeHtml(u.color)}" title="${escapeHtml(u.color)}"></span>`);
+  } else {
+    parts.push('<span class="swatch" style="background:#2a2e37" title="default"></span>');
+  }
+  if (u.tag) {
+    const bg = u.tag_bg ? ` style="background:${escapeHtml(u.tag_bg)}"` : '';
+    parts.push(`<span class="tag"${bg}>${escapeHtml(u.tag)}</span>`);
+  }
+  if (!u.color && !u.tag) parts.push('<span class="muted">—</span>');
+  return parts.join('');
+}
+
+function render(users) {
+  rowsEl.innerHTML = '';
+  users.forEach(u => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${u.id}</td>
+      <td>${escapeHtml(u.username)}</td>
+      <td>${profileCell(u)}</td>
+      <td class="${u.role === 'admin' ? 'role-admin' : ''}">${u.role}</td>
+      <td class="${u.banned ? 'banned' : 'ok'}">${u.banned ? 'banned' : 'active'}</td>
+      <td>${new Date(u.created_at).toLocaleString()}</td>
+      <td></td>
+    `;
+
+    const actions = tr.lastElementChild;
+
+    const banBtn = document.createElement('button');
+    banBtn.className = u.banned ? '' : 'danger';
+    banBtn.textContent = u.banned ? 'unban' : 'ban';
+    banBtn.onclick = () => act('/api/admin/ban', { id: u.id, banned: u.banned ? 0 : 1 });
+    actions.appendChild(banBtn);
+
+    const roleBtn = document.createElement('button');
+    if (u.role === 'admin') {
+      roleBtn.textContent = 'demote';
+      roleBtn.onclick = () => act('/api/admin/promote', { id: u.id, role: 'user' });
+    } else {
+      roleBtn.className = 'promote';
+      roleBtn.textContent = 'promote';
+      roleBtn.onclick = () => act('/api/admin/promote', { id: u.id, role: 'admin' });
+    }
+    actions.appendChild(roleBtn);
+
+    rowsEl.appendChild(tr);
+  });
+}
+
+async function act(route, body) {
+  const r = await fetch(route, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
+    body: JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { setMsg(data.error || 'Failed'); return; }
+  setMsg('Done');
+  loadUsers();
+}
+</script>
+</body>
+</html>
