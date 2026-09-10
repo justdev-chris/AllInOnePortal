@@ -22,7 +22,11 @@
 
 <div id="app" class="hidden">
   <aside>
-    <div>
+    <div id="sidebarThreads">
+      <h3>Messages</h3>
+      <ul id="threads"></ul>
+    </div>
+    <div id="sidebarOnline">
       <h3>Online</h3>
       <ul id="users"></ul>
     </div>
@@ -32,24 +36,31 @@
     <header>
       <span class="who" id="who"></span>
       <span class="spacer"></span>
-      <span id="status" style="color:#8b8f99;font-size:13px">connecting…</span>
+      <span id="slowBadge" class="hidden" title="Slow mode is on">🐌 <span id="slowSeconds"></span></span>
+      <span id="status">connecting…</span>
       <a id="adminLink" href="/admin.html" class="hidden">admin</a>
       <button id="profileBtn">profile</button>
       <button id="logout">Log out</button>
     </header>
+
+    <div id="muteBanner" class="hidden">
+      You are muted from the public chat.
+      <span id="muteUntil"></span>
+    </div>
 
     <div id="log"></div>
     <div id="typing"></div>
 
     <form class="composer" id="composer">
       <input id="textInput" type="text" placeholder="Type a message…" autocomplete="off" />
-      <button>Send</button>
+      <button id="sendBtn">Send</button>
     </form>
   </div>
 
   <div id="dmPanel" class="hidden">
     <div id="dmHeader">
       <b id="dmWith"></b>
+      <span id="dmTyping" class="muted" style="font-size:12px"></span>
       <button id="dmClose">close</button>
     </div>
     <div id="dmThread"></div>
@@ -84,6 +95,15 @@
     </div>
   </div>
 </div>
+
+<!-- @mention autocomplete popup -->
+<div id="mentionPopup" class="hidden"></div>
+
+<!-- quick admin context menu -->
+<div id="userMenu" class="hidden"></div>
+
+<!-- toasts -->
+<div id="toasts"></div>
 
 <script src="/js/core.js" defer></script>
 <script src="/js/chat.js" defer></script>
