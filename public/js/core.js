@@ -297,10 +297,19 @@ C.handleMessage = function (e) {
     return;
   }
 
-  if (m.type === 'msg') { C.addOrUpdateMsg(m); C.scroll(); return; }
-  if (m.type === 'msg-edited') {
-    const x = C.state.messages.get(m.id);
-    if (x) { x.text = m.text; x.edited_at = m.edited_at; C.renderMessage(x); }
+  if (m.type === 'msg') {
+    C.addOrUpdateMsg(m);
+    C.scroll();
+    if (C.checkMention?.(m)) {
+      const el = document.getElementById('msg-' + m.id);
+      if (el) {
+        el.classList.add('mention');
+        setTimeout(() => el.classList.remove('mention'), 4000);
+      }
+      C.showToast(`${m.username} mentioned you`, () => {
+        document.getElementById('msg-' + m.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
     return;
   }
   if (m.type === 'msg-deleted') {
