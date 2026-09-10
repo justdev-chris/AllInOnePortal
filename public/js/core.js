@@ -1,4 +1,4 @@
-// ==================== GLOBAL NAMESPACE ====================
+// ==================== NAMESPACE ====================
 window.Chat = window.Chat || {};
 const C = window.Chat;
 
@@ -9,18 +9,26 @@ C.state = {
   ws: null,
   reconnectDelay: 1000,
   authMode: 'login',
-  messages: new Map(),   // public msg id -> entry
-  dms: new Map(),        // dm id -> entry
-  profiles: new Map(),   // userId -> { id, username, role, color, tag, tag_bg }
+  messages: new Map(),
+  dms: new Map(),
+  profiles: new Map(),
+  unread: new Map(),          // userId -> count
+  threads: new Set(),         // userIds who have DM history with me
   activeDM: null,
   editingId: null,
   editingDmId: null,
   editingProfile: { color: '', tag: '', tag_bg: '' },
   typingTimers: new Map(),
+  dmTypingTimers: new Map(),
   lastTypingSent: 0,
+  lastDmTypingSent: 0,
+  slowmode: 0,                // seconds
+  lastSlowNotified: 0,
+  baseTitle: 'Chatroom',
 };
 
 C.PALETTE = ['', '#7aa2f7', '#9ece6a', '#e0af68', '#f7768e', '#bb9af7', '#7dcfff', '#ff9e64'];
+C.REACTIONS = ['👍', '❤️', '😂', '🎉', '🔥', '👀', '😢', '🤔'];
 
 // ==================== DOM REFS ====================
 C.refs = {
@@ -37,15 +45,24 @@ C.refs = {
   whoEl:        document.getElementById('who'),
   statusEl:     document.getElementById('status'),
   logoutBtn:    document.getElementById('logout'),
+  adminLink:    document.getElementById('adminLink'),
   logEl:        document.getElementById('log'),
   composer:     document.getElementById('composer'),
   textInput:    document.getElementById('textInput'),
+  sendBtn:      document.getElementById('sendBtn'),
   usersEl:      document.getElementById('users'),
+  threadsEl:    document.getElementById('threads'),
   typingEl:     document.getElementById('typing'),
+
+  slowBadge:    document.getElementById('slowBadge'),
+  slowSeconds:  document.getElementById('slowSeconds'),
+  muteBanner:   document.getElementById('muteBanner'),
+  muteUntil:    document.getElementById('muteUntil'),
 
   dmPanel:      document.getElementById('dmPanel'),
   dmThread:     document.getElementById('dmThread'),
   dmWith:       document.getElementById('dmWith'),
+  dmTyping:     document.getElementById('dmTyping'),
   dmClose:      document.getElementById('dmClose'),
   dmComposer:   document.getElementById('dmComposer'),
   dmInput:      document.getElementById('dmInput'),
@@ -56,6 +73,10 @@ C.refs = {
   profileTagBg: document.getElementById('profileTagBg'),
   previewEl:    document.getElementById('preview'),
   profileError: document.getElementById('profileError'),
+
+  mentionPopup: document.getElementById('mentionPopup'),
+  userMenu:     document.getElementById('userMenu'),
+  toastsEl:     document.getElementById('toasts'),
 };
 
 // ==================== HELPERS ====================
@@ -70,15 +91,60 @@ C.scroll = function () {
 };
 
 C.apiFetch = async function (route, body, method = 'POST') {
-  const opts = {
-    method,
-    headers: { 'content-type': 'application/json' },
-  };
+  const opts = { method, headers: { 'content-type': 'application/json' } };
   if (C.state.token) opts.headers.authorization = 'Bearer ' + C.state.token;
   if (body !== undefined) opts.body = JSON.stringify(body);
   const r = await fetch(route, opts);
   const data = await r.json().catch(() => ({}));
   return { ok: r.ok, status: r.status, data };
+};
+
+C.showToast = function (text, onClick) {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = text;
+  t.onclick = () => { onClick?.(); t.remove(); };
+  C.refs.toastsEl.appendChild(t);
+  setTimeout(() => t.remove(), 6000);
+};
+
+C.updateTitle = function () {
+  const n = [...C.state.unread.values()].reduce((a, b) => a + b, 0);
+  document.title = n > 0 ? `(${n}) ${C.state.baseTitle}` : C.state.baseTitle;
+};
+
+C.isMuted = function () {
+  const mu = C.state.me?.muted_until || 0;
+  if (mu === 0) return false;
+  if (mu === -1) return true;
+  return Date.now() < mu;
+};
+
+C.updateMuteUi = function () {
+  const muted = C.isMuted();
+  C.refs.muteBanner.classList.toggle('hidden', !muted);
+  if (muted) {
+    const mu = C.state.me.muted_until;
+    C.refs.muteUntil.textContent = mu === -1
+      ? '(permanent)'
+      : `(until ${new Date(mu).toLocaleTimeString()})`;
+  }
+  // composer disabled if muted (unless admin)
+  const isAdmin = C.state.me?.role === 'admin';
+  const disable = muted && !isAdmin;
+  C.refs.textInput.disabled = disable;
+  C.refs.sendBtn.disabled = disable;
+  C.refs.textInput.placeholder = disable ? 'You are muted' : 'Type a message…';
+};
+
+C.updateSlowUi = function () {
+  const s = C.state.slowmode;
+  if (!s) {
+    C.refs.slowBadge.classList.add('hidden');
+    return;
+  }
+  C.refs.slowBadge.classList.remove('hidden');
+  C.refs.slowSeconds.textContent = s + 's';
 };
 
 // ==================== AUTH ====================
@@ -177,6 +243,7 @@ C.connect = function () {
   ws.onmessage = C.handleMessage;
 };
 
+// ==================== MESSAGE DISPATCH ====================
 C.handleMessage = function (e) {
   let m;
   try { m = JSON.parse(e.data); } catch { return; }
@@ -191,17 +258,32 @@ C.handleMessage = function (e) {
 
   if (m.type === 'hello') {
     C.state.me = m.you;
+    C.state.slowmode = m.slowmode || 0;
     C.state.profiles.clear();
     m.users.forEach(u => C.state.profiles.set(u.id, u));
     C.state.profiles.set(m.you.id, m.you);
 
+    C.state.unread.clear();
+    Object.entries(m.unread || {}).forEach(([peer, n]) => C.state.unread.set(Number(peer), n));
+    C.updateTitle();
+
+    // sidebar threads (anyone with DM history)
+    C.state.threads.clear();
+    m.dms.forEach(d => {
+      const peer = d.from_id === m.you.id ? d.to_id : d.from_id;
+      C.state.threads.add(peer);
+    });
+
     const { whoEl, adminLink } = C.refs;
-    whoEl.innerHTML = `signed in as <b>${C.escapeHtml(m.you.username)}</b>`;
+    whoEl.innerHTML = `signed in as <b>${C.nameSpan({ user_id: m.you.id, username: m.you.username })}</b>`;
     whoEl.classList.toggle('admin', m.you.role === 'admin');
     if (m.you.role === 'admin') {
       whoEl.innerHTML += ` <span style="color:#e0af68;font-size:12px">· admin</span>`;
     }
-    document.getElementById('adminLink').classList.toggle('hidden', m.you.role !== 'admin');
+    adminLink.classList.toggle('hidden', m.you.role !== 'admin');
+
+    C.updateMuteUi();
+    C.updateSlowUi();
 
     C.refs.logEl.innerHTML = '';
     C.state.messages.clear();
@@ -209,6 +291,7 @@ C.handleMessage = function (e) {
     m.history.forEach(C.addOrUpdateMsg);
     m.dms.forEach(C.addOrUpdateDm);
     C.renderUsers(m.users);
+    C.renderThreads();
     C.scroll();
     C.refs.textInput.focus();
     return;
@@ -226,7 +309,7 @@ C.handleMessage = function (e) {
     return;
   }
 
-  if (m.type === 'dm') { C.addOrUpdateDm(m); return; }
+  if (m.type === 'dm') { C.onIncomingDm(m); return; }
   if (m.type === 'dm-edited') {
     const x = C.state.dms.get(m.id);
     if (x) { x.text = m.text; x.edited_at = m.edited_at; C.renderDm(x); }
@@ -235,6 +318,25 @@ C.handleMessage = function (e) {
   if (m.type === 'dm-deleted') {
     const x = C.state.dms.get(m.id);
     if (x) { x.deleted = 1; C.renderDm(x); }
+    return;
+  }
+  if (m.type === 'dm-read-by') {
+    // nothing to render yet, hook for "seen" ticks later
+    return;
+  }
+  if (m.type === 'dm-typing') {
+    if (m.from !== C.state.activeDM) return;
+    C.refs.dmTyping.textContent = `${m.username} typing…`;
+    clearTimeout(C.state.dmTypingTimers.get(m.from));
+    C.state.dmTypingTimers.set(m.from, setTimeout(() => {
+      C.refs.dmTyping.textContent = '';
+    }, 1800));
+    return;
+  }
+
+  if (m.type === 'reactions') {
+    const x = C.state.messages.get(m.id);
+    if (x) { x.reactions = m.reactions; C.renderMessage(x); }
     return;
   }
 
@@ -247,17 +349,52 @@ C.handleMessage = function (e) {
     return;
   }
 
+  if (m.type === 'mute-state') {
+    if (C.state.me) C.state.me.muted_until = m.muted_until;
+    C.updateMuteUi();
+    return;
+  }
+  if (m.type === 'slowmode') {
+    C.state.slowmode = m.seconds;
+    C.updateSlowUi();
+    return;
+  }
+
   if (m.type === 'users') { C.renderUsers(m.users); return; }
   if (m.type === 'system') { C.addSystem(m.text); C.scroll(); return; }
-  if (m.type === 'error') { alert(m.text); return; }
+  if (m.type === 'error') {
+    C.showToast(m.text);
+    return;
+  }
 
   if (m.type === 'typing') {
     if (m.user_id === C.state.me?.id) return;
     C.refs.typingEl.textContent = `${m.username} is typing…`;
     clearTimeout(C.state.typingTimers.get(m.user_id));
-    C.state.typingTimers.set(m.user_id, setTimeout(() => { C.refs.typingEl.textContent = ''; }, 1500));
+    C.state.typingTimers.set(m.user_id, setTimeout(() => {
+      C.refs.typingEl.textContent = '';
+    }, 1500));
   }
 };
 
-// global export for debug
+// ==================== INCOMING DM ====================
+C.onIncomingDm = function (m) {
+  const me = C.state.me;
+  const peer = m.from_id === me.id ? m.to_id : m.from_id;
+  C.state.threads.add(peer);
+  C.addOrUpdateDm(m);
+  C.renderThreads();
+
+  if (m.from_id !== me.id && peer !== C.state.activeDM) {
+    C.state.unread.set(peer, (C.state.unread.get(peer) || 0) + 1);
+    C.updateTitle();
+    C.renderUsers([...C.state.profiles.values()]);
+    C.renderThreads();
+    const from = C.state.profiles.get(peer);
+    C.showToast(`${from?.username || 'someone'}: ${m.text.slice(0, 60)}`,
+      () => C.openDM(peer, from?.username || 'user'));
+  }
+};
+
+// debug handle
 window.Chat = C;
