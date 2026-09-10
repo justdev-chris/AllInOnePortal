@@ -2,6 +2,7 @@
   const C = window.Chat;
   const { refs, state } = C;
 
+  // ==================== PROFILE MODAL ====================
   document.getElementById('profileBtn').onclick = openProfile;
   document.getElementById('profileCancel').onclick = () => refs.profileModal.classList.add('hidden');
   document.getElementById('profileSave').onclick = saveProfile;
@@ -119,7 +120,6 @@
       state.profiles.set(state.me.id, { ...state.profiles.get(state.me.id), ...state.me });
       refs.profileModal.classList.add('hidden');
 
-      // update header
       refs.whoEl.innerHTML = `signed in as <b>${C.nameSpan({ user_id: state.me.id, username: state.me.username })}</b>`;
       refs.whoEl.classList.toggle('admin', state.me.role === 'admin');
       if (state.me.role === 'admin') {
@@ -128,5 +128,117 @@
     } catch {
       refs.profileError.textContent = 'Network error';
     }
+  }
+
+  // ==================== QUICK ADMIN CONTEXT MENU ====================
+  const menu = refs.userMenu;
+
+  function closeMenu() {
+    menu.classList.add('hidden');
+    menu.innerHTML = '';
+  }
+
+  C.openUserMenu = function (user, x, y) {
+    if (state.me?.role !== 'admin') {
+      // non-admins: only DM
+      menu.innerHTML = '';
+      const dm = document.createElement('div');
+      dm.className = 'item';
+      dm.textContent = 'Send DM';
+      dm.onclick = () => { closeMenu(); C.openDM(user.id, user.username); };
+      menu.appendChild(dm);
+      positionMenu(x, y);
+      return;
+    }
+
+    menu.innerHTML = '';
+    const isAdmin = user.role === 'admin';
+    const isBanned = !!user.banned;
+    const isMuted = user.muted_until && (user.muted_until === -1 || user.muted_until > Date.now());
+    const isMe = user.id === state.me.id;
+
+    addItem('Send DM', () => { closeMenu(); C.openDM(user.id, user.username); });
+
+    if (!isMe) {
+      addSep();
+      if (isMuted) {
+        addItem('Unmute', () => { closeMenu(); quickMute(user, -1); }, 'warn');
+      } else {
+        addItem('Mute 5 min',  () => { closeMenu(); quickMute(user, 300); }, 'warn');
+        addItem('Mute 1 hour', () => { closeMenu(); quickMute(user, 3600); }, 'warn');
+        addItem('Mute 1 day',  () => { closeMenu(); quickMute(user, 86400); }, 'warn');
+        addItem('Mute permanent', () => { closeMenu(); quickMute(user, 0); }, 'warn');
+      }
+
+      addSep();
+      if (isAdmin) {
+        addItem('Demote', () => { closeMenu(); quickPromote(user, 'user'); });
+      } else {
+        addItem('Promote', () => { closeMenu(); quickPromote(user, 'admin'); });
+      }
+
+      addSep();
+      if (isBanned) {
+        addItem('Unban', () => { closeMenu(); quickBan(user, false); });
+      } else {
+        addItem('Ban', () => { closeMenu(); quickBan(user, true); }, 'danger');
+      }
+    }
+
+    positionMenu(x, y);
+  };
+
+  function addItem(label, onclick, cls) {
+    const d = document.createElement('div');
+    d.className = 'item' + (cls ? ' ' + cls : '');
+    d.textContent = label;
+    d.onclick = onclick;
+    menu.appendChild(d);
+  }
+  function addSep() {
+    const s = document.createElement('div');
+    s.className = 'sep';
+    menu.appendChild(s);
+  }
+  function positionMenu(x, y) {
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    menu.classList.remove('hidden');
+    // keep inside viewport
+    requestAnimationFrame(() => {
+      const r = menu.getBoundingClientRect();
+      if (r.right > innerWidth) menu.style.left = (x - r.width) + 'px';
+      if (r.bottom > innerHeight) menu.style.top = (y - r.height) + 'px';
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    if (!menu.contains(e.target)) closeMenu();
+  });
+  document.addEventListener('contextmenu', (e) => {
+    // if not on a sidebar item, close
+    if (!menu.contains(e.target) && !e.target.closest('aside li')) {
+      closeMenu();
+    }
+  });
+  document.addEventListener('scroll', closeMenu, true);
+
+  async function quickMute(user, duration) {
+    const { ok, data } = await C.apiFetch('/api/admin/mute', { id: user.id, duration });
+    if (!ok) { C.showToast(data.error || 'Failed'); return; }
+    C.showToast(duration === -1 ? `Unmuted ${user.username}` : `Muted ${user.username}`);
+  }
+
+  async function quickPromote(user, role) {
+    const { ok, data } = await C.apiFetch('/api/admin/promote', { id: user.id, role });
+    if (!ok) { C.showToast(data.error || 'Failed'); return; }
+    C.showToast(role === 'admin' ? `Promoted ${user.username}` : `Demoted ${user.username}`);
+  }
+
+  async function quickBan(user, banned) {
+    if (banned && !confirm(`Ban ${user.username}?`)) return;
+    const { ok, data } = await C.apiFetch('/api/admin/ban', { id: user.id, banned: banned ? 1 : 0 });
+    if (!ok) { C.showToast(data.error || 'Failed'); return; }
+    C.showToast(banned ? `Banned ${user.username}` : `Unbanned ${user.username}`);
   }
 })();
