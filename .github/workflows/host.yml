@@ -1,4 +1,4 @@
-name: Host Chatroom
+name: Host Chatroom & Eaglercraft Public Server
 
 on:
   workflow_dispatch:
@@ -81,9 +81,10 @@ jobs:
 
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase || true
           git add .url
           git commit -m "chore: update tunnel URL [skip ci]" || echo "no change"
-          git push
+          git push || true
 
       - name: Keep alive
         run: |
@@ -119,3 +120,172 @@ jobs:
           [ -f server.pid ] && kill $(cat server.pid) 2>/dev/null || true
           echo "---- server.log ----"; cat server.log 2>/dev/null || true
           echo "---- tunnel.log ----"; cat tunnel.log 2>/dev/null || true
+
+  eaglercraft:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Setup Java
+      uses: actions/setup-java@v3
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Checkout Repo
+      uses: actions/checkout@v3
+
+    - name: Clone Eaglercraft-Server-Paper
+      run: |
+        git clone https://github.com/Eaglercraft-Templates/Eaglercraft-Server-Paper.git server
+        cd server
+
+    - name: Restore World from Repo
+      run: |
+        mkdir -p server/world
+        if [ -d "world" ] && [ "$(ls -A world)" ]; then
+          echo "✅ Restoring world from repo..."
+          cp -r world/* server/world/
+          echo "📁 World size: $(du -sh world | cut -f1)"
+        else
+          echo "ℹ️ No world backup found, starting fresh."
+        fi
+
+    - name: Setup Web Directory
+      run: |
+        mkdir -p web
+        if [ -f "index.html" ]; then
+          cp index.html web/
+          echo "✅ index.html copied to web/"
+        else
+          echo "⚠️ index.html not found in repo root"
+        fi
+
+    - name: Start Python HTTP Server
+      run: |
+        cd web
+        python3 -m http.server 8000 &
+        echo "✅ Web server started on port 8000"
+
+    - name: Start Eaglercraft Server
+      run: |
+        cd server
+        chmod +x run.sh
+        ./run.sh &
+        echo "⏳ Waiting for server to start..."
+        sleep 30
+        echo "✅ Server should be running!"
+
+    - name: Install Cloudflare Tunnel
+      run: |
+        curl -L -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+        chmod +x cloudflared
+
+    - name: Start Tunnel for Eaglercraft
+      run: |
+        echo "🌐 Starting Cloudflare tunnel for Eaglercraft (port 25565)..."
+        nohup ./cloudflared tunnel --url http://localhost:25565 > eagler-tunnel.log 2>&1 &
+        echo $! > eagler-tunnel.pid
+
+        URL=""
+        for i in {1..30}; do
+          URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' eagler-tunnel.log | head -1)
+          [ -n "$URL" ] && break
+          sleep 1
+        done
+
+        if [ -z "$URL" ]; then
+          echo "❌ Failed to obtain Eaglercraft tunnel URL"
+          cat eagler-tunnel.log
+          exit 1
+        fi
+        echo "$URL" > .eagler_url_latest
+        echo "🎮 Eaglercraft URL: $URL"
+
+    - name: Start Tunnel for Web Server
+      run: |
+        echo "🌐 Starting Cloudflare tunnel for Web Server (port 8000)..."
+        nohup ./cloudflared tunnel --url http://localhost:8000 > web-tunnel.log 2>&1 &
+        echo $! > web-tunnel.pid
+
+        URL=""
+        for i in {1..30}; do
+          URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' web-tunnel.log | head -1)
+          [ -n "$URL" ] && break
+          sleep 1
+        done
+
+        if [ -z "$URL" ]; then
+          echo "❌ Failed to obtain Web tunnel URL"
+          cat web-tunnel.log
+          exit 1
+        fi
+        echo "$URL" > .web_url_latest
+        echo "📁 Media Player URL: $URL/a"
+
+    - name: Publish URLs to repo
+      run: |
+        EAGLER_URL=$(cat .eagler_url_latest)
+        WEB_URL=$(cat .web_url_latest)
+        rm -f .eagler_url_latest .web_url_latest
+
+        mkdir -p .url
+        echo "$EAGLER_URL" > .url/eaglercraft-latest.txt
+        echo "$WEB_URL/a"   > .url/media-latest.txt
+        echo "$(date -u +%FT%TZ) EAGLERCRAFT: $EAGLER_URL  |  MEDIA: $WEB_URL/a" >> .url/eaglercraft-history.txt
+
+        echo "::notice title=Eaglercraft URL::$EAGLER_URL"
+        echo "::notice title=Media Player URL::$WEB_URL/a"
+        echo "### 🎮 Eaglercraft live at: $EAGLER_URL" >> $GITHUB_STEP_SUMMARY
+        echo "### 📁 Media Player live at: $WEB_URL/a" >> $GITHUB_STEP_SUMMARY
+
+        git config user.name  "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git pull --rebase || true
+        git add .url/eaglercraft-latest.txt .url/media-latest.txt .url/eaglercraft-history.txt
+        git commit -m "chore: update eaglercraft URLs [skip ci]" || echo "no change"
+        git push || true
+
+    - name: Keep Tunnel Alive
+      run: |
+        echo "================================================"
+        echo "🌐 PUBLIC URLs:"
+        echo "================================================"
+        echo ""
+        echo "  🎮 EAGLERCRAFT:   $(cat .url/eaglercraft-latest.txt 2>/dev/null || echo 'see logs')"
+        echo "  📁 MEDIA PLAYER:  $(cat .url/media-latest.txt 2>/dev/null || echo 'see logs')"
+        echo ""
+        echo "  ⚠️  URLs change every run!"
+        echo "================================================"
+        echo ""
+        echo "⏳ Keeping tunnels alive..."
+        while true; do
+          sleep 60
+          echo "⏰ Tunnels still active - $(date)"
+        done
+
+    - name: Commit World Back to Repo
+      if: always()
+      run: |
+        if [ -d "server/world" ] && [ "$(ls -A server/world)" ]; then
+          echo "💾 Saving world to repo..."
+          rm -rf world
+          cp -r server/world world
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.github.com"
+          git pull --rebase || true
+          git add world
+          git diff --staged --quiet || git commit -m "💾 Auto-save world [skip ci]"
+          git push || true
+          echo "✅ World saved to repo!"
+          echo "📁 World size: $(du -sh world | cut -f1)"
+        else
+          echo "⚠️ No world data to save"
+        fi
+
+    - name: Upload World as Artifact (Backup)
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: world-backup-${{ github.run_id }}
+        path: server/world
+        retention-days: 90
