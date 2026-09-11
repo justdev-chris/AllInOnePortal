@@ -1,0 +1,32 @@
+{
+  "name": "Astral",
+  "version": "1.0.0",
+  "description": "Epic proxy",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/Reider71164/Astral-Games.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Reider71164/Astral-Games/issues"
+  },
+  "homepage": "https://github.com/Reider71164/Astral-Games#readme",
+  "dependencies": {
+    "@tomphttp/bare-server-node": "^1.2.2",
+    "acorn-hammerhead": "^0.5.0",
+    "css-tree": "^2.1.0",
+    "express": "^4.19.2",
+    "node-static": "^0.7.11",
+    "parse5": "^6.0.1",
+    "webpack": "^5.70.0"
+  }
+}

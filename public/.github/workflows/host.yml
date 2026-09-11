@@ -1,0 +1,69 @@
+name: Deploy Static Site with Cloudflare Tunnel
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # Install cloudflared for tunneling
+        curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+        chmod +x cloudflared
+        sudo mv cloudflared /usr/local/bin/
+    
+    - name: Verify installation
+      run: |
+        python --version
+        cloudflared --version
+    
+    - name: Start Python HTTP Server
+      run: |
+        # Start Python HTTP server in background
+        python -m http.server 8000 &
+        # Wait for server to start
+        sleep 3
+        echo "HTTP server started on port 8000"
+    
+    - name: Start Cloudflare Tunnel
+      run: |
+        # Start Cloudflare tunnel
+        cloudflared tunnel --url http://localhost:8000 &
+        # Wait for tunnel to establish
+        sleep 5
+        echo "Cloudflare tunnel established"
+    
+    - name: Get Tunnel URL
+      run: |
+        # Get the tunnel URL from cloudflared output
+        TUNNEL_URL=$(cloudflared tunnel --url http://localhost:8000 2>&1 | grep -o 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com' | head -1)
+        echo "Tunnel URL: $TUNNEL_URL"
+        echo "TUNNEL_URL=$TUNNEL_URL" >> $GITHUB_ENV
+        # Keep tunnel running for the duration of the workflow
+        sleep 3600  # Adjust as needed for your use case
+    
+    - name: Keep tunnel alive
+      run: |
+        echo "✅ Tunnel is active at: ${{ env.TUNNEL_URL }}"
+        echo "📝 This workflow will keep the tunnel running for 1 hour"
+        echo "ℹ️ Press Ctrl+C to stop manually if running locally"
+        
+        # Keep the process alive
+        while true; do
+          sleep 60
+          echo "⏰ Tunnel still active at: ${{ env.TUNNEL_URL }}"
+        done

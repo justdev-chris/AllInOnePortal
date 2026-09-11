@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Ace Attorney</title>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3044824252307692"
+            crossorigin="anonymous"></script>
+    <style>
+        body {
+            background-color: #333333;
+        }
+    </style>
+</head>
+    <body>
+        <desmond-player id="player"></desmond-player>
+        <script src="../../desmond/desmond.min.js"></script>
+        <script>
+            window.onload = function() {
+                document.querySelector("desmond-player").loadURL("aceattorney.nds")
+                document.querySelector("desmond-player").shadowRoot.querySelector("#top").style = "position: fixed;transform: translate(-50%, -50%);width: 50%;left: 50%;top: 25%;height: 50%;";
+                document.querySelector("desmond-player").shadowRoot.querySelector("#bottom").style = "position: fixed;transform: translate(-50%, -50%);width: 50%;left: 50%;top: 75%;height: 50%;";
+            }
+        </script>
+        <!--Anchor Ad Start-->
+		<script>
+			var afg={};afg.u=6328;afg.s=31;
+			afg.anchor="bottom";
+			document.write("<sc"+"ript src='//js.adforgames.com/cd.js'></sc"+"ript>");
+		</script>
+		<!--Anchor Ad End-->
+    </body>
+</html>
