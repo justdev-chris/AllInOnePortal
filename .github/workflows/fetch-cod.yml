@@ -1,0 +1,46 @@
+name: Download and Commit COD
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  download-and-commit:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download COD.zip
+      run: |
+        wget -O COD.zip "https://temp.sh/sUwmJ/COD.zip"
+
+    - name: Extract COD.zip
+      run: |
+        unzip -o COD.zip
+
+    - name: Copy COD folder contents to public/storage/gxmes
+      run: |
+        mkdir -p public/storage/gxmes
+        cp -r COD/* public/storage/gxmes/
+
+    - name: Verify files
+      run: |
+        ls -la public/storage/gxmes/
+
+    - name: Commit and push
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add public/storage/gxmes
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Add COD files to public/storage/gxmes"
+          git push
+        fi
