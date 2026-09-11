@@ -81,10 +81,19 @@ jobs:
 
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase || true
-          git add .url
-          git commit -m "chore: update tunnel URL [skip ci]" || echo "no change"
-          git push || true
+
+          git add .url/latest.txt .url/history.txt
+          git commit -m "chore: update tunnel URL [skip ci]" || echo "no change to commit"
+
+          for i in 1 2 3 4 5 6; do
+            if git push; then
+              echo "push succeeded on attempt $i"
+              break
+            fi
+            echo "push rejected, rebasing and retrying (attempt $i)..."
+            git pull --rebase --autostash || true
+            sleep $((i * 2))
+          done
 
       - name: Keep alive
         run: |
@@ -240,10 +249,19 @@ jobs:
 
         git config user.name  "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git pull --rebase || true
+
         git add .url/eaglercraft-latest.txt .url/media-latest.txt .url/eaglercraft-history.txt
-        git commit -m "chore: update eaglercraft URLs [skip ci]" || echo "no change"
-        git push || true
+        git commit -m "chore: update eaglercraft URLs [skip ci]" || echo "no change to commit"
+
+        for i in 1 2 3 4 5 6; do
+          if git push; then
+            echo "push succeeded on attempt $i"
+            break
+          fi
+          echo "push rejected, rebasing and retrying (attempt $i)..."
+          git pull --rebase --autostash || true
+          sleep $((i * 2))
+        done
 
     - name: Keep Tunnel Alive
       run: |
@@ -272,10 +290,19 @@ jobs:
           cp -r server/world world
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.github.com"
-          git pull --rebase || true
           git add world
           git diff --staged --quiet || git commit -m "💾 Auto-save world [skip ci]"
-          git push || true
+
+          for i in 1 2 3 4 5 6; do
+            if git push; then
+              echo "push succeeded on attempt $i"
+              break
+            fi
+            echo "push rejected, rebasing and retrying (attempt $i)..."
+            git pull --rebase --autostash || true
+            sleep $((i * 2))
+          done
+
           echo "✅ World saved to repo!"
           echo "📁 World size: $(du -sh world | cut -f1)"
         else
