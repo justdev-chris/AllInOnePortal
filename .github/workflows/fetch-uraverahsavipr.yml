@@ -1,0 +1,34 @@
+name: Fetch uraverahsavipr site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fetch-uraverahsavipr.yml'
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout current repo
+        uses: actions/checkout@v4
+
+      - name: Clone uraverahsavipr.github.io
+        run: |
+          git clone --depth 1 https://github.com/justdev-chris/uraverahsavipr.github.io.git /tmp/site
+
+      - name: Copy files into public/
+        run: |
+          rsync -a --exclude='.git' /tmp/site/ public/
+
+      - name: Commit and push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public
+          git diff --cached --quiet || git commit -m "chore: update uraverahsavipr snapshot [skip ci]"
+          git push
