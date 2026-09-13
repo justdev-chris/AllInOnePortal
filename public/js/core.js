@@ -12,8 +12,8 @@ C.state = {
   messages: new Map(),
   dms: new Map(),
   profiles: new Map(),
-  unread: new Map(),          // userId -> count
-  threads: new Set(),         // userIds who have DM history with me
+  unread: new Map(),
+  threads: new Set(),
   activeDM: null,
   editingId: null,
   editingDmId: null,
@@ -22,7 +22,7 @@ C.state = {
   dmTypingTimers: new Map(),
   lastTypingSent: 0,
   lastDmTypingSent: 0,
-  slowmode: 0,                // seconds
+  slowmode: 0,
   lastSlowNotified: 0,
   baseTitle: 'Chatroom',
 };
@@ -129,7 +129,6 @@ C.updateMuteUi = function () {
       ? '(permanent)'
       : `(until ${new Date(mu).toLocaleTimeString()})`;
   }
-  // composer disabled if muted (unless admin)
   const isAdmin = C.state.me?.role === 'admin';
   const disable = muted && !isAdmin;
   C.refs.textInput.disabled = disable;
@@ -267,7 +266,6 @@ C.handleMessage = function (e) {
     Object.entries(m.unread || {}).forEach(([peer, n]) => C.state.unread.set(Number(peer), n));
     C.updateTitle();
 
-    // sidebar threads (anyone with DM history)
     C.state.threads.clear();
     m.dms.forEach(d => {
       const peer = d.from_id === m.you.id ? d.to_id : d.from_id;
@@ -312,6 +310,16 @@ C.handleMessage = function (e) {
     }
     return;
   }
+  if (m.type === 'msg-edited') {
+    const x = C.state.messages.get(m.id);
+    if (x) { x.text = m.text; x.edited_at = m.edited_at; C.renderMessage(x); }
+    return;
+  }
+  if (m.type === 'msg-image') {
+    const x = C.state.messages.get(m.id);
+    if (x) { x.image_url = m.image_url; C.renderMessage(x); }
+    return;
+  }
   if (m.type === 'msg-deleted') {
     const x = C.state.messages.get(m.id);
     if (x) { x.deleted = 1; C.renderMessage(x); }
@@ -324,13 +332,17 @@ C.handleMessage = function (e) {
     if (x) { x.text = m.text; x.edited_at = m.edited_at; C.renderDm(x); }
     return;
   }
+  if (m.type === 'dm-image') {
+    const x = C.state.dms.get(m.id);
+    if (x) { x.image_url = m.image_url; C.renderDm(x); }
+    return;
+  }
   if (m.type === 'dm-deleted') {
     const x = C.state.dms.get(m.id);
     if (x) { x.deleted = 1; C.renderDm(x); }
     return;
   }
   if (m.type === 'dm-read-by') {
-    // nothing to render yet, hook for "seen" ticks later
     return;
   }
   if (m.type === 'dm-typing') {
