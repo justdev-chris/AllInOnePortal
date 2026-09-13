@@ -5,74 +5,151 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Admin — Chatroom</title>
 <style>
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: dark;
+    --bg: #0f1115;
+    --panel: #1a1d24;
+    --border: #2a2e37;
+    --border-soft: #23262d;
+    --text: #e6e6e6;
+    --text-dim: #8b8f99;
+    --accent: #5865f2;
+    --accent-hover: #4752c4;
+    --link: #7aa2f7;
+    --danger: #f7768e;
+    --warn: #e0af68;
+    --ok: #9ece6a;
+    --info: #7dcfff;
+    --tag-bg: #2a2e37;
+    --tag-fg: #cfd3dc;
+  }
   * { box-sizing: border-box; }
   body { margin: 0; font: 15px/1.4 system-ui, sans-serif;
-    background: #0f1115; color: #e6e6e6; padding: 24px; }
+    background: var(--bg); color: var(--text); padding: 24px; }
   h1 { margin: 0 0 8px; font-size: 20px; }
-  h2 { margin: 24px 0 10px; font-size: 15px; color: #8b8f99;
+  h2 { margin: 24px 0 10px; font-size: 15px; color: var(--text-dim);
     text-transform: uppercase; letter-spacing: .06em; }
-  a { color: #7aa2f7; }
+  a { color: var(--link); }
   .topbar { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
   .topbar .slow { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-  .topbar select, .topbar input {
-    background: #1a1d24; border: 1px solid #2a2e37; color: inherit;
+  .topbar select, .topbar input, .topbar textarea {
+    background: var(--panel); border: 1px solid var(--border); color: inherit;
     padding: 6px 10px; border-radius: 6px; font: inherit; font-size: 13px;
   }
-  table { width: 100%; border-collapse: collapse; background: #1a1d24;
-    border: 1px solid #2a2e37; border-radius: 8px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
   th, td { padding: 10px 12px; text-align: left;
-    border-bottom: 1px solid #23262d; font-size: 14px; vertical-align: middle; }
-  th { color: #8b8f99; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+    border-bottom: 1px solid var(--border-soft); font-size: 14px; vertical-align: middle; }
+  th { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
   tr:last-child td { border-bottom: 0; }
-  .role-admin { color: #e0af68; font-weight: 600; }
-  .banned { color: #f7768e; }
-  .muted { color: #e0af68; }
-  .ok { color: #9ece6a; }
-  button { background: #2a2e37; border: 0; color: #e6e6e6;
+  .role-admin { color: var(--warn); font-weight: 600; }
+  .banned { color: var(--danger); }
+  .muted { color: var(--warn); }
+  .ok { color: var(--ok); }
+  button { background: var(--tag-bg); border: 0; color: var(--text);
     padding: 6px 10px; border-radius: 6px; cursor: pointer;
     font: inherit; font-size: 13px; margin-right: 4px; }
   button:hover { background: #3a3f4a; }
-  button.danger { background: #4a1f27; color: #f7768e; }
+  button.danger { background: #4a1f27; color: var(--danger); }
   button.danger:hover { background: #5f2830; }
-  button.promote { background: #2d3a23; color: #9ece6a; }
+  button.promote { background: #2d3a23; color: var(--ok); }
   button.promote:hover { background: #3a4a2c; }
-  button.warn { background: #3d3219; color: #e0af68; }
+  button.warn { background: #3d3219; color: var(--warn); }
   button.warn:hover { background: #4f4120; }
-  #msg { color: #8b8f99; margin-top: 12px; font-size: 13px; min-height: 18px; }
-  #denied { display: none; background: #1a1d24; border: 1px solid #2a2e37;
+  #msg { color: var(--text-dim); margin-top: 12px; font-size: 13px; min-height: 18px; }
+  #denied { display: none; background: var(--panel); border: 1px solid var(--border);
     border-radius: 8px; padding: 20px; text-align: center; }
   .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 50%;
-    border: 1px solid #2a2e37; vertical-align: middle; margin-right: 6px; }
+    border: 1px solid var(--border); vertical-align: middle; margin-right: 6px; }
   .swatch.rainbow { background: linear-gradient(90deg,#ff6b6b,#f7b731,#9ece6a,#4fd1c5,#7aa2f7,#bb9af7); }
   .tag { display: inline-block; font-size: 11px; padding: 1px 6px;
-    border-radius: 10px; background: #2a2e37; color: #cfd3dc; margin-left: 6px; }
-  .muted-note { color: #e0af68; font-size: 12px; margin-left: 6px; }
-  .tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid #23262d; }
+    border-radius: 10px; background: var(--tag-bg); color: var(--tag-fg); margin-left: 6px; }
+  .muted-note { color: var(--warn); font-size: 12px; margin-left: 6px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
   .tab { background: transparent; border: 0; border-bottom: 2px solid transparent;
-    padding: 8px 14px; color: #8b8f99; cursor: pointer; font: inherit; font-size: 14px;
+    padding: 8px 14px; color: var(--text-dim); cursor: pointer; font: inherit; font-size: 14px;
     margin: 0; border-radius: 0; }
-  .tab:hover { background: #1a1d24; color: #e6e6e6; }
-  .tab.active { color: #e6e6e6; border-bottom-color: #5865f2; }
+  .tab:hover { background: var(--panel); color: var(--text); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
   .audit-filters { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
   .audit-filters input, .audit-filters select {
-    background: #1a1d24; border: 1px solid #2a2e37; color: inherit;
+    background: var(--panel); border: 1px solid var(--border); color: inherit;
     padding: 6px 10px; border-radius: 6px; font: inherit; font-size: 13px;
   }
-  .audit-filters button { background: #5865f2; color: #fff; }
-  .audit-filters button:hover { background: #4752c4; }
+  .audit-filters button { background: var(--accent); color: #fff; }
+  .audit-filters button:hover { background: var(--accent-hover); }
   .action-pill {
     display: inline-block; font-size: 11px; padding: 2px 8px;
-    border-radius: 10px; background: #2a2e37; color: #cfd3dc;
+    border-radius: 10px; background: var(--tag-bg); color: var(--tag-fg);
   }
-  .action-pill.ban    { background: #4a1f27; color: #f7768e; }
-  .action-pill.unban  { background: #2d3a23; color: #9ece6a; }
-  .action-pill.mute   { background: #3d3219; color: #e0af68; }
-  .action-pill.unmute { background: #2d3a23; color: #9ece6a; }
-  .action-pill.promote { background: #2d3a23; color: #9ece6a; }
-  .action-pill.demote { background: #3a2d1f; color: #e0af68; }
-  .action-pill.slowmode { background: #2a3040; color: #7dcfff; }
-  .action-pill.delete-message { background: #3a2d1f; color: #e0af68; }
+  .action-pill.ban    { background: #4a1f27; color: var(--danger); }
+  .action-pill.unban  { background: #2d3a23; color: var(--ok); }
+  .action-pill.mute   { background: #3d3219; color: var(--warn); }
+  .action-pill.unmute { background: #2d3a23; color: var(--ok); }
+  .action-pill.promote { background: #2d3a23; color: var(--ok); }
+  .action-pill.demote { background: #3a2d1f; color: var(--warn); }
+  .action-pill.slowmode { background: #2a3040; color: var(--info); }
+  .action-pill.delete-message { background: #3a2d1f; color: var(--warn); }
+  .action-pill.announce { background: #2a3040; color: var(--info); }
+  .action-pill.announce-clear { background: #2a3040; color: var(--info); }
+  .action-pill.sound-upload { background: #2d3a23; color: var(--ok); }
+  .action-pill.sound-delete { background: #3a2d1f; color: var(--warn); }
+
+  .announceBox {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px; margin-bottom: 12px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .announceBox textarea {
+    width: 100%; min-height: 70px; resize: vertical;
+    background: var(--bg); border: 1px solid var(--border); color: inherit;
+    padding: 10px 12px; border-radius: 8px; font: inherit; font-size: 14px;
+  }
+  .announceBox .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .announceBox .row label { color: var(--text-dim); font-size: 13px; display: flex; gap: 6px; align-items: center; }
+  .announceBox .row input[type=datetime-local] {
+    background: var(--bg); border: 1px solid var(--border); color: inherit;
+    padding: 6px 10px; border-radius: 6px; font: inherit; font-size: 13px;
+  }
+  .announceBox .buttons { display: flex; gap: 8px; }
+  .announceBox .buttons button.primary { background: var(--accent); color: #fff; }
+  .announceBox .buttons button.primary:hover { background: var(--accent-hover); }
+  .announceBox .current {
+    color: var(--text-dim); font-size: 13px;
+    border-top: 1px solid var(--border-soft); padding-top: 10px;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .announceBox .current b { color: var(--text); }
+
+  .soundGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .soundItem {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .soundItem .name { flex: 1; font-size: 14px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .soundItem audio { display: none; }
+  .soundUploadRow {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px;
+  }
+  .soundUploadRow input[type=text] {
+    background: var(--bg); border: 1px solid var(--border); color: inherit;
+    padding: 6px 10px; border-radius: 6px; font: inherit; font-size: 13px;
+    flex: 1; min-width: 160px;
+  }
+  .soundUploadRow input[type=file] {
+    color: var(--text-dim); font-size: 13px;
+  }
+  .soundUploadRow button.primary { background: var(--accent); color: #fff; }
+  .soundUploadRow button.primary:hover { background: var(--accent-hover); }
 </style>
 </head>
 <body>
@@ -81,7 +158,7 @@
   <h1>Admin panel</h1>
   <a href="/">← back to chat</a>
   <div class="slow">
-    <label style="color:#8b8f99;font-size:13px">Slow mode</label>
+    <label style="color:var(--text-dim);font-size:13px">Slow mode</label>
     <select id="slowmode">
       <option value="0">off</option>
       <option value="3">3s</option>
@@ -102,6 +179,8 @@
 <div id="panel" style="display:none">
   <div class="tabs">
     <button class="tab active" data-tab="users">Users</button>
+    <button class="tab" data-tab="announce">Announcement</button>
+    <button class="tab" data-tab="sounds">Sounds</button>
     <button class="tab" data-tab="audit">Audit log</button>
   </div>
 
@@ -122,6 +201,33 @@
     </table>
   </div>
 
+  <div id="tab-announce" style="display:none">
+    <div class="announceBox">
+      <label style="color:var(--text-dim);font-size:12px;text-transform:uppercase;letter-spacing:.05em">Post announcement</label>
+      <textarea id="announceText" maxlength="500" placeholder="Message shown to everyone in chat…"></textarea>
+      <div class="row">
+        <label><input type="checkbox" id="announceDismissible" checked /> dismissible by users</label>
+        <label>expires:
+          <input type="datetime-local" id="announceExpires" />
+        </label>
+      </div>
+      <div class="buttons">
+        <button class="primary" id="announcePost">Post</button>
+        <button id="announceClear">Clear current</button>
+      </div>
+      <div class="current" id="announceCurrent">no announcement set</div>
+    </div>
+  </div>
+
+  <div id="tab-sounds" style="display:none">
+    <div class="soundGrid" id="soundGrid"></div>
+    <div class="soundUploadRow">
+      <input type="text" id="soundName" placeholder="sound name (max 24)" maxlength="24" />
+      <input type="file" id="soundFile" accept="audio/*" />
+      <button class="primary" id="soundUpload">upload</button>
+    </div>
+  </div>
+
   <div id="tab-audit" style="display:none">
     <div class="audit-filters">
       <input id="f-actor"  placeholder="actor" />
@@ -136,6 +242,10 @@
         <option>demote</option>
         <option>slowmode</option>
         <option>delete-message</option>
+        <option>announce</option>
+        <option>announce-clear</option>
+        <option>sound-upload</option>
+        <option>sound-delete</option>
       </select>
       <button id="f-apply">apply</button>
       <button id="f-reset">reset</button>
@@ -187,6 +297,8 @@ if (!token) {
       wireTabs();
       wireSlowmode();
       wireAuditFilters();
+      wireAnnounce();
+      wireSounds();
     })
     .catch(() => { document.getElementById('denied').style.display = 'block'; });
 }
@@ -198,9 +310,12 @@ function wireTabs() {
       document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
       t.classList.add('active');
       const name = t.dataset.tab;
-      document.getElementById('tab-users').style.display = name === 'users' ? '' : 'none';
-      document.getElementById('tab-audit').style.display = name === 'audit' ? '' : 'none';
+      ['users','announce','sounds','audit'].forEach(n => {
+        document.getElementById('tab-' + n).style.display = (n === name) ? '' : 'none';
+      });
       if (name === 'audit') loadAudit();
+      if (name === 'sounds') loadSounds();
+      if (name === 'announce') loadAnnouncement();
     };
   });
 }
@@ -233,7 +348,7 @@ function profileCell(u) {
   const parts = [];
   if (u.color === 'rainbow') parts.push('<span class="swatch rainbow"></span>');
   else if (u.color) parts.push(`<span class="swatch" style="background:${escapeHtml(u.color)}"></span>`);
-  else parts.push('<span class="swatch" style="background:#2a2e37"></span>');
+  else parts.push('<span class="swatch" style="background:var(--tag-bg)"></span>');
   if (u.tag) {
     const bg = u.tag_bg ? ` style="background:${escapeHtml(u.tag_bg)}"` : '';
     parts.push(`<span class="tag"${bg}>${escapeHtml(u.tag)}</span>`);
@@ -271,7 +386,6 @@ function render(users) {
     `;
     const actions = tr.lastElementChild;
 
-    // ban
     const banBtn = document.createElement('button');
     banBtn.className = u.banned ? '' : 'danger';
     banBtn.textContent = u.banned ? 'unban' : 'ban';
@@ -280,7 +394,6 @@ function render(users) {
     );
     actions.appendChild(banBtn);
 
-    // role
     const roleBtn = document.createElement('button');
     if (u.role === 'admin') {
       roleBtn.textContent = 'demote';
@@ -296,7 +409,6 @@ function render(users) {
     }
     actions.appendChild(roleBtn);
 
-    // mute
     const isMuted = u.muted_until && (u.muted_until === -1 || u.muted_until > Date.now());
     const muteBtn = document.createElement('button');
     muteBtn.className = isMuted ? 'warn' : '';
@@ -378,7 +490,7 @@ async function loadAudit() {
   auditRows.innerHTML = '';
   if (!entries.length) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan="5" style="color:#8b8f99;text-align:center">no entries</td>`;
+    tr.innerHTML = `<td colspan="5" style="color:var(--text-dim);text-align:center">no entries</td>`;
     auditRows.appendChild(tr);
     return;
   }
@@ -388,10 +500,168 @@ async function loadAudit() {
       <td>${new Date(e.ts).toLocaleString()}</td>
       <td>${escapeHtml(e.actor_username)}</td>
       <td><span class="action-pill ${escapeHtml(e.action)}">${escapeHtml(e.action)}</span></td>
-      <td>${e.target_username ? escapeHtml(e.target_username) : '<span style="color:#565b66">—</span>'}</td>
-      <td>${e.reason ? escapeHtml(e.reason) : '<span style="color:#565b66">—</span>'}</td>
+      <td>${e.target_username ? escapeHtml(e.target_username) : '<span style="color:var(--text-dim)">—</span>'}</td>
+      <td>${e.reason ? escapeHtml(e.reason) : '<span style="color:var(--text-dim)">—</span>'}</td>
     `;
     auditRows.appendChild(tr);
+  });
+}
+
+// ---------- announcements ----------
+function wireAnnounce() {
+  document.getElementById('announcePost').onclick = async () => {
+    const text = document.getElementById('announceText').value.trim();
+    if (!text) { setMsg('Announcement text required'); return; }
+    const dismissible = document.getElementById('announceDismissible').checked;
+    const expRaw = document.getElementById('announceExpires').value;
+    const expires_at = expRaw ? new Date(expRaw).getTime() : null;
+
+    const r = await fetch('/api/admin/announce', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
+      body: JSON.stringify({ text, dismissible, expires_at }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { setMsg(data.error || 'Failed'); return; }
+    setMsg('Announcement posted');
+    document.getElementById('announceText').value = '';
+    loadAnnouncement();
+  };
+
+  document.getElementById('announceClear').onclick = async () => {
+    if (!confirm('Clear the current announcement?')) return;
+    const r = await fetch('/api/admin/announce/clear', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
+    });
+    if (!r.ok) { setMsg('Failed'); return; }
+    setMsg('Announcement cleared');
+    loadAnnouncement();
+  };
+
+  loadAnnouncement();
+}
+
+async function loadAnnouncement() {
+  const el = document.getElementById('announceCurrent');
+  // no direct GET; reuse audit? no — just call a lightweight check via /api/admin/users is wrong.
+  // Simpler: the server doesn't expose a GET for the current announcement.
+  // We can fetch it indirectly through the WS hello, but for the admin page we'll
+  // add a tiny read via /api/admin/announce-current below.
+  try {
+    const r = await fetch('/api/admin/announce-current', {
+      headers: { authorization: 'Bearer ' + token },
+    });
+    if (!r.ok) { el.textContent = 'no announcement set'; return; }
+    const { announcement } = await r.json();
+    if (!announcement) {
+      el.textContent = 'no announcement set';
+      return;
+    }
+    const exp = announcement.expires_at
+      ? ` (expires ${new Date(announcement.expires_at).toLocaleString()})`
+      : '';
+    el.innerHTML = `<b>Current:</b> ${escapeHtml(announcement.text)}<br><span style="color:var(--text-dim);font-size:12px">posted ${new Date(announcement.ts).toLocaleString()}${exp}</span>`;
+  } catch {
+    el.textContent = 'no announcement set';
+  }
+}
+
+// ---------- sounds ----------
+function wireSounds() {
+  document.getElementById('soundUpload').onclick = async () => {
+    const name = document.getElementById('soundName').value.trim();
+    const file = document.getElementById('soundFile').files?.[0];
+    if (!name) { setMsg('Name required'); return; }
+    if (!file) { setMsg('File required'); return; }
+    if (file.size > 2 * 1024 * 1024) { setMsg('Max 2 MB'); return; }
+
+    const fd = new FormData();
+    fd.append('name', name);
+    fd.append('file', file);
+
+    const btn = document.getElementById('soundUpload');
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/admin/sounds/upload', {
+        method: 'POST',
+        headers: { authorization: 'Bearer ' + token },
+        body: fd,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { setMsg(data.error || 'Upload failed'); return; }
+      setMsg('Uploaded');
+      document.getElementById('soundName').value = '';
+      document.getElementById('soundFile').value = '';
+      loadSounds();
+    } catch {
+      setMsg('Upload failed');
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  loadSounds();
+}
+
+async function loadSounds() {
+  const grid = document.getElementById('soundGrid');
+  const r = await fetch('/api/sounds');
+  if (!r.ok) { grid.innerHTML = ''; return; }
+  const { sounds } = await r.json();
+
+  grid.innerHTML = '';
+  if (!sounds.length) {
+    grid.innerHTML = '<div style="color:var(--text-dim);font-size:13px">no sounds yet</div>';
+    return;
+  }
+
+  sounds.forEach(s => {
+    const item = document.createElement('div');
+    item.className = 'soundItem';
+    item.innerHTML = `
+      <span class="name" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</span>
+    `;
+
+    const play = document.createElement('button');
+    play.textContent = '▶';
+    play.style.padding = '4px 8px';
+    let audio = null;
+    play.onclick = () => {
+      if (audio && !audio.paused) {
+        audio.pause();
+        audio.currentTime = 0;
+        play.textContent = '▶';
+        return;
+      }
+      if (audio) audio.pause();
+      audio = new Audio(s.url);
+      audio.play().then(() => {
+        play.textContent = '■';
+      }).catch(() => {});
+      audio.onended = () => { play.textContent = '▶'; };
+    };
+    item.appendChild(play);
+
+    const del = document.createElement('button');
+    del.className = 'danger';
+    del.textContent = 'delete';
+    del.style.padding = '4px 8px';
+    del.onclick = async () => {
+      if (!confirm(`Delete sound "${s.name}"?`)) return;
+      const rr = await fetch('/api/admin/sounds/delete', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
+        body: JSON.stringify({ id: s.id }),
+      });
+      const data = await rr.json().catch(() => ({}));
+      if (!rr.ok) { setMsg(data.error || 'Failed'); return; }
+      setMsg('Deleted');
+      loadSounds();
+    };
+    item.appendChild(del);
+
+    grid.appendChild(item);
   });
 }
 </script>
