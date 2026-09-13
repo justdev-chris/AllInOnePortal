@@ -84,6 +84,8 @@ addColumnIfMissing('users', 'tag',          "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('users', 'tag_bg',       "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('users', 'muted_until',  "INTEGER NOT NULL DEFAULT 0");
 addColumnIfMissing('dms',   'read_at',      "INTEGER");
+addColumnIfMissing('messages', 'image_url', "TEXT");
+addColumnIfMissing('dms',      'image_url', "TEXT");
 
 // settings helpers
 function getSetting(key, fallback) {
@@ -318,7 +320,7 @@ app.post('/api/admin/promote', requireAdmin, (req, res) => {
 
 app.post('/api/admin/mute', requireAdmin, (req, res) => {
   const id = Number(req.body.id);
-  const duration = Number(req.body.duration || 0);   // seconds; 0 = permanent, -1 = unmute
+  const duration = Number(req.body.duration || 0);
   const reason = String(req.body.reason || '').trim().slice(0, 200);
   if (id === req.admin.id) return res.status(400).json({ error: 'Cannot mute yourself' });
   const target = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
@@ -330,10 +332,10 @@ app.post('/api/admin/mute', requireAdmin, (req, res) => {
     until = Date.now() + duration * 1000;
     action = 'mute';
   } else if (duration === 0) {
-    until = -1;   // sentinel: permanent mute
+    until = -1;
     action = 'mute';
   } else {
-    until = 0;    // unmute
+    until = 0;
     action = 'unmute';
   }
 
