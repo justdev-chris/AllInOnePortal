@@ -1,9 +1,11 @@
 const path = require('path');
+const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const Database = require('better-sqlite3');
+const multer = require('multer');
 const { attachSocketServer } = require('./socket');
 
 const app = express();
@@ -13,6 +15,10 @@ const ADMIN_USERNAME = (process.env.ADMIN_USERNAME || '').trim();
 
 app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ==================== UPLOAD DIR ====================
+const SOUNDS_DIR = path.join(__dirname, 'public', 'uploads', 'sounds');
+fs.mkdirSync(SOUNDS_DIR, { recursive: true });
 
 // ==================== DB ====================
 const db = new Database('chat.db');
@@ -68,6 +74,13 @@ db.exec(`
     target_id INTEGER,
     target_username TEXT,
     reason TEXT,
+    ts INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS sounds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    uploader_id INTEGER NOT NULL,
     ts INTEGER NOT NULL
   );
 `);
@@ -129,7 +142,6 @@ ensureAdminUser();
 const socketApi = attachSocketServer(server, db);
 const { broadcast, sendTo, onlineUsers, broadcastUserList, userSockets, sockets } = socketApi;
 
-// make helpers available to socket.js if it needs them
 socketApi.getSetting = getSetting;
 
 // ==================== AUTH ====================
@@ -266,6 +278,14 @@ app.post('/api/profile', (req, res) => {
   res.json({ ok: true, profile: { color, tag, tag_bg } });
 });
 
+// ==================== SOUNDS ====================
+app.get('/api/sounds', (req, res) => {
+  const rows = db.prepare('SELECT id, name, filename FROM sounds ORDER BY id ASC').all();
+  res.json({
+    sounds: rows.map(r => ({ id: r.id, name: r.name, url: '/uploads/sounds/' + r.filename })),
+  });
+});
+
 // ==================== ADMIN ====================
 function requireAdmin(req, res, next) {
   const u = sessionUser(req);
@@ -274,6 +294,57 @@ function requireAdmin(req, res, next) {
   req.admin = u;
   next();
 }
+
+const soundUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, SOUNDS_DIR),
+    filename: (req, file, cb) => {
+      const ext = (path.extname(file.originalname) || '').toLowerCase();
+      const safeExt = ['.mp3', '.wav', '.ogg', '.oga', '.webm', '.m4a', '.aac', '.flac'].includes(ext)
+        ? ext : '.bin';
+      cb(null, crypto.randomUUID() + safeExt);
+    },
+  }),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ok = /^audio\//i.test(file.mimetype) ||
+               /\.(mp3|wav|ogg|oga|webm|m4a|aac|flac)$/i.test(file.originalname);
+    cb(ok ? null : new Error('Not audio'), ok);
+  },
+});
+
+app.post('/api/admin/sounds/upload', requireAdmin, (req, res) => {
+  soundUpload.single('file')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message || 'Upload failed' });
+    if (!req.file) return res.status(400).json({ error: 'No file' });
+
+    const name = String(req.body.name || '').trim().slice(0, 24);
+    if (!name) {
+      try { fs.unlinkSync(req.file.path); } catch {}
+      return res.status(400).json({ error: 'Name required' });
+    }
+
+    const now = Date.now();
+    const info = db.prepare(
+      'INSERT INTO sounds (name, filename, uploader_id, ts) VALUES (?, ?, ?, ?)'
+    ).run(name, req.file.filename, req.admin.id, now);
+
+    audit(req.admin, 'sound-upload', null, name);
+    broadcast({ type: 'sounds-changed' });
+    res.json({ ok: true, sound: { id: info.lastInsertRowid, name, url: '/uploads/sounds/' + req.file.filename } });
+  });
+});
+
+app.post('/api/admin/sounds/delete', requireAdmin, (req, res) => {
+  const id = Number(req.body.id);
+  const row = db.prepare('SELECT * FROM sounds WHERE id = ?').get(id);
+  if (!row) return res.status(404).json({ error: 'No such sound' });
+  db.prepare('DELETE FROM sounds WHERE id = ?').run(id);
+  try { fs.unlinkSync(path.join(SOUNDS_DIR, row.filename)); } catch {}
+  audit(req.admin, 'sound-delete', null, row.name);
+  broadcast({ type: 'sounds-changed' });
+  res.json({ ok: true });
+});
 
 app.get('/api/admin/users', requireAdmin, (req, res) => {
   const rows = db.prepare(
@@ -374,6 +445,33 @@ app.post('/api/admin/slowmode', requireAdmin, (req, res) => {
   audit(req.admin, 'slowmode', null, `${seconds}s`);
   broadcast({ type: 'slowmode', seconds });
   res.json({ ok: true, seconds });
+});
+
+// ==================== ANNOUNCEMENTS ====================
+app.post('/api/admin/announce', requireAdmin, (req, res) => {
+  const text = String(req.body.text || '').trim().slice(0, 500);
+  if (!text) return res.status(400).json({ error: 'Text required' });
+  const dismissible = req.body.dismissible === false ? false : true;
+  const expires_at = req.body.expires_at ? Number(req.body.expires_at) : null;
+
+  const a = {
+    id: crypto.randomUUID(),
+    text,
+    ts: Date.now(),
+    dismissible,
+    expires_at,
+  };
+  setSetting('announcement', JSON.stringify(a));
+  audit(req.admin, 'announce', null, text.slice(0, 100));
+  broadcast({ type: 'announcement', announcement: a });
+  res.json({ ok: true, announcement: a });
+});
+
+app.post('/api/admin/announce/clear', requireAdmin, (req, res) => {
+  setSetting('announcement', '');
+  audit(req.admin, 'announce-clear', null, null);
+  broadcast({ type: 'announcement', announcement: null });
+  res.json({ ok: true });
 });
 
 app.get('/api/admin/audit', requireAdmin, (req, res) => {
