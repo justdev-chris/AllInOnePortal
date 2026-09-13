@@ -2,8 +2,6 @@ name: Host Chatroom & Eaglercraft Public Server
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 */5 * * *'
 
 concurrency:
   group: chatroom-host
@@ -15,7 +13,7 @@ permissions:
 jobs:
   host:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 540
 
     steps:
       - name: Checkout
@@ -112,7 +110,7 @@ jobs:
           tail -f server.log tunnel.log &
           TAIL_PID=$!
 
-          sleep 340m || true
+          sleep 540m || true
 
           kill $SNAP_PID $TAIL_PID 2>/dev/null || true
 
@@ -132,6 +130,7 @@ jobs:
 
   eaglercraft:
     runs-on: ubuntu-latest
+    timeout-minutes: 540
 
     steps:
     - name: Setup Java
@@ -275,11 +274,8 @@ jobs:
         echo "  ⚠️  URLs change every run!"
         echo "================================================"
         echo ""
-        echo "⏳ Keeping tunnels alive..."
-        while true; do
-          sleep 60
-          echo "⏰ Tunnels still active - $(date)"
-        done
+        echo "⏳ Keeping tunnels alive for 9 hours..."
+        sleep 540m || true
 
     - name: Commit World Back to Repo
       if: always()
@@ -316,3 +312,111 @@ jobs:
         name: world-backup-${{ github.run_id }}
         path: server/world
         retention-days: 90
+
+  frontstrike:
+    runs-on: ubuntu-latest
+    timeout-minutes: 540
+
+    steps:
+      - name: Checkout this repo (chatroom)
+        uses: actions/checkout@v4
+        with:
+          path: main-repo
+
+      - name: Checkout FrontStrike repo
+        uses: actions/checkout@v4
+        with:
+          repository: justdev-chris/FrontStrike
+          path: frontstrike
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install FrontStrike dependencies
+        working-directory: frontstrike
+        run: npm install
+
+      - name: Install cloudflared
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            -o /usr/local/bin/cloudflared
+          chmod +x /usr/local/bin/cloudflared
+          cloudflared --version
+
+      - name: Start FrontStrike server
+        working-directory: frontstrike
+        run: |
+          nohup npm start > ../fs-server.log 2>&1 &
+          echo $! > ../fs-server.pid
+          for i in {1..20}; do
+            curl -sf http://localhost:3000 >/dev/null && break
+            sleep 1
+          done
+
+      - name: Start Cloudflare quick tunnel
+        run: |
+          nohup cloudflared tunnel --no-autoupdate --url http://localhost:3000 \
+            > fs-tunnel.log 2>&1 &
+          echo $! > fs-tunnel.pid
+
+          URL=""
+          for i in {1..30}; do
+            URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' fs-tunnel.log | head -1)
+            [ -n "$URL" ] && break
+            sleep 1
+          done
+
+          if [ -z "$URL" ]; then
+            echo "failed to obtain FrontStrike tunnel URL"
+            cat fs-tunnel.log
+            exit 1
+          fi
+
+          echo "::notice title=FrontStrike URL::$URL"
+          echo "### FrontStrike live at: $URL" >> $GITHUB_STEP_SUMMARY
+
+      - name: Publish URL to chatroom repo
+        run: |
+          URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' fs-tunnel.log | head -1)
+          if [ -z "$URL" ]; then
+            echo "no URL to publish"
+            exit 1
+          fi
+
+          cd main-repo
+          mkdir -p .url
+          echo "$URL" > .url/frontstrike-latest.txt
+          echo "$(date -u +%FT%TZ) $URL" >> .url/frontstrike-history.txt
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add .url/frontstrike-latest.txt .url/frontstrike-history.txt
+          git commit -m "chore: update frontstrike URL [skip ci]" || echo "no change to commit"
+
+          for i in 1 2 3 4 5 6; do
+            if git push; then
+              echo "push succeeded on attempt $i"
+              break
+            fi
+            echo "push rejected, rebasing and retrying (attempt $i)..."
+            git pull --rebase --autostash || true
+            sleep $((i * 2))
+          done
+
+      - name: Keep alive
+        run: |
+          tail -f fs-server.log fs-tunnel.log &
+          TAIL_PID=$!
+          sleep 540m || true
+          kill $TAIL_PID 2>/dev/null || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          [ -f fs-tunnel.pid ] && kill $(cat fs-tunnel.pid) 2>/dev/null || true
+          [ -f fs-server.pid ] && kill $(cat fs-server.pid) 2>/dev/null || true
+          echo "---- fs-server.log ----"; cat fs-server.log 2>/dev/null || true
+          echo "---- fs-tunnel.log ----"; cat fs-tunnel.log 2>/dev/null || true
