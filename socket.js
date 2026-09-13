@@ -1,11 +1,12 @@
 const { WebSocketServer, WebSocket } = require('ws');
+const { findImageUrl } = require('./imageprobe');
 
 function attachSocketServer(httpServer, db) {
   const wss = new WebSocketServer({ server: httpServer });
 
   // ==================== REGISTRY ====================
-  const sockets = new Map();      // ws -> { userId, username, role, color, tag, tag_bg, muted_until }
-  const userSockets = new Map();  // userId -> Set<ws>
+  const sockets = new Map();
+  const userSockets = new Map();
 
   function attach(ws, user) {
     const info = {
@@ -58,8 +59,8 @@ function attachSocketServer(httpServer, db) {
 
   // ==================== HELPERS ====================
   function isMuted(info) {
-    if (!info.muted_until) return false;         // 0 = not muted
-    if (info.muted_until === -1) return true;    // permanent
+    if (!info.muted_until) return false;
+    if (info.muted_until === -1) return true;
     return Date.now() < info.muted_until;
   }
 
@@ -72,8 +73,7 @@ function attachSocketServer(httpServer, db) {
     return Number(getSetting('slowmode_seconds', '0')) || 0;
   }
 
-  // per-user last message timestamps (in-memory; resets on restart, fine for slowmode)
-  const lastMessageAt = new Map();   // userId -> ts
+  const lastMessageAt = new Map();
 
   // ==================== CONNECTION ====================
   wss.on('connection', (ws, req) => {
@@ -94,11 +94,10 @@ function attachSocketServer(httpServer, db) {
     attach(ws, user);
 
     const history = db.prepare(`
-      SELECT id, user_id, username, text, ts, edited_at, deleted
+      SELECT id, user_id, username, text, ts, edited_at, deleted, image_url
       FROM messages ORDER BY id DESC LIMIT 100
     `).all().reverse();
 
-    // attach reactions to messages
     const messageIds = history.map(m => m.id);
     const reactions = messageIds.length
       ? db.prepare(`
@@ -115,12 +114,11 @@ function attachSocketServer(httpServer, db) {
     for (const m of history) m.reactions = reactMap.get(m.id) || [];
 
     const dms = db.prepare(`
-      SELECT id, from_id, to_id, text, ts, edited_at, deleted, read_at
+      SELECT id, from_id, to_id, text, ts, edited_at, deleted, read_at, image_url
       FROM dms WHERE from_id = ? OR to_id = ?
       ORDER BY id DESC LIMIT 200
     `).all(user.id, user.id).reverse();
 
-    // unread counts (peer -> count)
     const unreadRows = db.prepare(`
       SELECT from_id AS peer, COUNT(*) AS n
       FROM dms
@@ -145,7 +143,7 @@ function attachSocketServer(httpServer, db) {
     broadcast({ type: 'system', text: `${user.username} joined`, ts: Date.now() }, ws);
     broadcastUserList();
 
-    ws.on('message', (raw) => {
+    ws.on('message', async (raw) => {
       let msg;
       try { msg = JSON.parse(raw); } catch { return; }
       const me = sockets.get(ws);
@@ -176,15 +174,23 @@ function attachSocketServer(httpServer, db) {
         const info = db.prepare(
           'INSERT INTO messages (user_id, username, text, ts) VALUES (?, ?, ?, ?)'
         ).run(me.userId, me.username, text, now);
+        const id = info.lastInsertRowid;
 
         broadcast({
           type: 'msg',
-          id: info.lastInsertRowid,
+          id,
           user_id: me.userId,
           username: me.username,
           text, ts: now,
           edited_at: null, deleted: 0,
           reactions: [],
+          image_url: null,
+        });
+
+        findImageUrl(text).then((image_url) => {
+          if (!image_url) return;
+          db.prepare('UPDATE messages SET image_url = ? WHERE id = ?').run(image_url, id);
+          broadcast({ type: 'msg-image', id, image_url });
         });
         return;
       }
@@ -202,13 +208,24 @@ function attachSocketServer(httpServer, db) {
         const info = db.prepare(
           'INSERT INTO dms (from_id, to_id, text, ts, read_at) VALUES (?, ?, ?, ?, ?)'
         ).run(me.userId, to, text, now, null);
+        const id = info.lastInsertRowid;
+
         const payload = {
-          type: 'dm', id: info.lastInsertRowid,
+          type: 'dm', id,
           from_id: me.userId, to_id: to,
           text, ts: now, edited_at: null, deleted: 0,
+          image_url: null,
         };
         sendTo(me.userId, payload);
         sendTo(to, payload);
+
+        findImageUrl(text).then((image_url) => {
+          if (!image_url) return;
+          db.prepare('UPDATE dms SET image_url = ? WHERE id = ?').run(image_url, id);
+          const follow = { type: 'dm-image', id, image_url };
+          sendTo(me.userId, follow);
+          sendTo(to, follow);
+        });
         return;
       }
 
@@ -223,6 +240,11 @@ function attachSocketServer(httpServer, db) {
         const now = Date.now();
         db.prepare('UPDATE messages SET text = ?, edited_at = ? WHERE id = ?').run(text, now, msg.id);
         broadcast({ type: 'msg-edited', id: msg.id, text, edited_at: now });
+
+        findImageUrl(text).then((image_url) => {
+          db.prepare('UPDATE messages SET image_url = ? WHERE id = ?').run(image_url, msg.id);
+          broadcast({ type: 'msg-image', id: msg.id, image_url });
+        });
         return;
       }
 
@@ -248,6 +270,13 @@ function attachSocketServer(httpServer, db) {
         const payload = { type: 'dm-edited', id: msg.id, text, edited_at: now };
         sendTo(row.from_id, payload);
         sendTo(row.to_id, payload);
+
+        findImageUrl(text).then((image_url) => {
+          db.prepare('UPDATE dms SET image_url = ? WHERE id = ?').run(image_url, msg.id);
+          const follow = { type: 'dm-image', id: msg.id, image_url };
+          sendTo(row.from_id, follow);
+          sendTo(row.to_id, follow);
+        });
         return;
       }
 
