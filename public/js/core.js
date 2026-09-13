@@ -25,6 +25,8 @@ C.state = {
   slowmode: 0,
   lastSlowNotified: 0,
   baseTitle: 'Chatroom',
+  announcement: null,
+  soundReady: false,
 };
 
 C.PALETTE = ['', '#7aa2f7', '#9ece6a', '#e0af68', '#f7768e', '#bb9af7', '#7dcfff', '#ff9e64'];
@@ -58,6 +60,7 @@ C.refs = {
   slowSeconds:  document.getElementById('slowSeconds'),
   muteBanner:   document.getElementById('muteBanner'),
   muteUntil:    document.getElementById('muteUntil'),
+  announceBanner: document.getElementById('announceBanner'),
 
   dmPanel:      document.getElementById('dmPanel'),
   dmThread:     document.getElementById('dmThread'),
@@ -144,6 +147,46 @@ C.updateSlowUi = function () {
   }
   C.refs.slowBadge.classList.remove('hidden');
   C.refs.slowSeconds.textContent = s + 's';
+};
+
+// ==================== ANNOUNCEMENT ====================
+C.renderAnnouncement = function (a) {
+  const el = C.refs.announceBanner;
+  C.state.announcement = a || null;
+
+  if (!a) {
+    el.classList.add('hidden');
+    el.innerHTML = '';
+    return;
+  }
+
+  if (a.expires_at && Date.now() > a.expires_at) {
+    el.classList.add('hidden');
+    el.innerHTML = '';
+    return;
+  }
+
+  const dismissed = localStorage.getItem('dismissedAnnouncementId');
+  if (dismissed === String(a.id)) {
+    el.classList.add('hidden');
+    el.innerHTML = '';
+    return;
+  }
+
+  el.classList.remove('hidden');
+  el.innerHTML = `
+    <div class="aText">${C.escapeHtml(a.text)}<span class="aTime">${new Date(a.ts).toLocaleString()}</span></div>
+    ${a.dismissible === false ? '' : '<button class="aClose" type="button" title="Dismiss">✕</button>'}
+  `;
+
+  const closeBtn = el.querySelector('.aClose');
+  if (closeBtn) {
+    closeBtn.onclick = () => {
+      localStorage.setItem('dismissedAnnouncementId', String(a.id));
+      el.classList.add('hidden');
+      el.innerHTML = '';
+    };
+  }
 };
 
 // ==================== AUTH ====================
@@ -276,12 +319,13 @@ C.handleMessage = function (e) {
     whoEl.innerHTML = `signed in as <b>${C.nameSpan({ user_id: m.you.id, username: m.you.username })}</b>`;
     whoEl.classList.toggle('admin', m.you.role === 'admin');
     if (m.you.role === 'admin') {
-      whoEl.innerHTML += ` <span style="color:#e0af68;font-size:12px">· admin</span>`;
+      whoEl.innerHTML += ` <span style="color:var(--warn);font-size:12px">· admin</span>`;
     }
     adminLink.classList.toggle('hidden', m.you.role !== 'admin');
 
     C.updateMuteUi();
     C.updateSlowUi();
+    C.renderAnnouncement(m.announcement || null);
 
     C.refs.logEl.innerHTML = '';
     C.state.messages.clear();
@@ -292,6 +336,11 @@ C.handleMessage = function (e) {
     C.renderThreads();
     C.scroll();
     C.refs.textInput.focus();
+
+    if (!C.state.soundReady) {
+      C.state.soundReady = true;
+      if (C.refreshSoundPanel) C.refreshSoundPanel();
+    }
     return;
   }
 
@@ -358,6 +407,19 @@ C.handleMessage = function (e) {
   if (m.type === 'reactions') {
     const x = C.state.messages.get(m.id);
     if (x) { x.reactions = m.reactions; C.renderMessage(x); }
+    return;
+  }
+
+  if (m.type === 'sound') {
+    if (C.playIncomingSound) C.playIncomingSound(m);
+    return;
+  }
+
+  if (m.type === 'announcement') {
+    C.renderAnnouncement(m.announcement || null);
+    if (m.announcement) {
+      C.showToast('New announcement');
+    }
     return;
   }
 
