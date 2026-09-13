@@ -1,5 +1,6 @@
 const { WebSocketServer, WebSocket } = require('ws');
 const { findImageUrl } = require('./imageprobe');
+const path = require('path');
 
 function attachSocketServer(httpServer, db) {
   const wss = new WebSocketServer({ server: httpServer });
@@ -73,7 +74,30 @@ function attachSocketServer(httpServer, db) {
     return Number(getSetting('slowmode_seconds', '0')) || 0;
   }
 
+  function getAnnouncement() {
+    const raw = getSetting('announcement', '');
+    if (!raw) return null;
+    try {
+      const a = JSON.parse(raw);
+      if (!a || !a.text) return null;
+      if (a.expires_at && Date.now() > a.expires_at) return null;
+      return a;
+    } catch {
+      return null;
+    }
+  }
+
   const lastMessageAt = new Map();
+  const lastSoundAt = new Map();
+
+  // ==================== SOUND REGISTRY ====================
+  function getSoundById(id) {
+    return db.prepare('SELECT id, name, filename FROM sounds WHERE id = ?').get(id);
+  }
+
+  function soundUrl(filename) {
+    return '/uploads/sounds/' + filename;
+  }
 
   // ==================== CONNECTION ====================
   wss.on('connection', (ws, req) => {
@@ -137,6 +161,7 @@ function attachSocketServer(httpServer, db) {
       },
       history, dms, unread,
       slowmode: getSlowmodeSeconds(),
+      announcement: getAnnouncement(),
       users: onlineUsers(),
     }));
 
@@ -318,6 +343,30 @@ function attachSocketServer(httpServer, db) {
         return;
       }
 
+      // ---- sound board ----
+      if (msg.type === 'sound' && Number.isInteger(msg.id)) {
+        if (me.role !== 'admin') {
+          return ws.send(JSON.stringify({ type: 'error', text: 'Admins only' }));
+        }
+        const now = Date.now();
+        const last = lastSoundAt.get(me.userId) || 0;
+        if (now - last < 3000) {
+          return ws.send(JSON.stringify({ type: 'error', text: 'Slow down' }));
+        }
+        const s = getSoundById(msg.id);
+        if (!s) {
+          return ws.send(JSON.stringify({ type: 'error', text: 'No such sound' }));
+        }
+        lastSoundAt.set(me.userId, now);
+        broadcast({
+          type: 'sound',
+          id: s.id,
+          name: s.name,
+          url: soundUrl(s.filename),
+        });
+        return;
+      }
+
       // ---- typing ----
       if (msg.type === 'typing') {
         broadcast({ type: 'typing', user_id: me.userId, username: me.username }, ws);
@@ -345,7 +394,20 @@ function attachSocketServer(httpServer, db) {
     ws.on('error', () => {});
   });
 
-  return { wss, broadcast, sendTo, onlineUsers, broadcastUserList, userSockets, sockets };
+  function broadcastAll(payload) {
+    broadcast(payload);
+  }
+
+  return {
+    wss,
+    broadcast,
+    broadcastAll,
+    sendTo,
+    onlineUsers,
+    broadcastUserList,
+    userSockets,
+    sockets,
+  };
 }
 
 module.exports = { attachSocketServer };
