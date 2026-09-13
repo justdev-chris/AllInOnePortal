@@ -66,9 +66,9 @@
       wrap.style.cssText = 'display:flex;gap:6px;margin-top:8px;width:100%';
       wrap.innerHTML = `
         <input id="customHex" type="text" maxlength="7" placeholder="#ff00aa"
-          style="flex:1;background:#0f1115;border:1px solid #2a2e37;color:inherit;padding:6px 8px;border-radius:6px;font:inherit;font-size:13px" />
+          style="flex:1;background:var(--panel);border:1px solid var(--border);color:inherit;padding:6px 8px;border-radius:6px;font:inherit;font-size:13px" />
         <button id="customHexBtn" type="button"
-          style="background:#2a2e37;color:#e6e6e6;border:0;padding:6px 10px;border-radius:6px;cursor:pointer;font:inherit;font-size:13px">use</button>
+          style="background:var(--tag-bg);color:var(--text);border:0;padding:6px 10px;border-radius:6px;cursor:pointer;font:inherit;font-size:13px">use</button>
       `;
       refs.paletteEl.appendChild(wrap);
       wrap.querySelector('#customHexBtn').onclick = () => {
@@ -123,7 +123,7 @@
       refs.whoEl.innerHTML = `signed in as <b>${C.nameSpan({ user_id: state.me.id, username: state.me.username })}</b>`;
       refs.whoEl.classList.toggle('admin', state.me.role === 'admin');
       if (state.me.role === 'admin') {
-        refs.whoEl.innerHTML += ` <span style="color:#e0af68;font-size:12px">· admin</span>`;
+        refs.whoEl.innerHTML += ` <span style="color:var(--warn);font-size:12px">· admin</span>`;
       }
     } catch {
       refs.profileError.textContent = 'Network error';
@@ -140,7 +140,6 @@
 
   C.openUserMenu = function (user, x, y) {
     if (state.me?.role !== 'admin') {
-      // non-admins: only DM
       menu.innerHTML = '';
       const dm = document.createElement('div');
       dm.className = 'item';
@@ -204,7 +203,6 @@
     menu.style.left = x + 'px';
     menu.style.top = y + 'px';
     menu.classList.remove('hidden');
-    // keep inside viewport
     requestAnimationFrame(() => {
       const r = menu.getBoundingClientRect();
       if (r.right > innerWidth) menu.style.left = (x - r.width) + 'px';
@@ -216,7 +214,6 @@
     if (!menu.contains(e.target)) closeMenu();
   });
   document.addEventListener('contextmenu', (e) => {
-    // if not on a sidebar item, close
     if (!menu.contains(e.target) && !e.target.closest('aside li')) {
       closeMenu();
     }
