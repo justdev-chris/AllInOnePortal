@@ -26,25 +26,23 @@
     return `<span class="name rainbow">${spans}</span>${tag}`;
   };
 
-  // ==================== LINK / GIF DETECT ====================
-  const IMG_RE = /https?:\/\/[^\s<>"']+\.(?:gif|png|jpe?g|webp)(?:\?[^\s<>"']*)?/i;
+  // ==================== LINK / IMAGE RENDER ====================
   const URL_RE = /https?:\/\/[^\s<>"']+/i;
 
-  function renderText(raw) {
-    const escaped = C.escapeHtml(raw);
-    const imgMatch = raw.match(IMG_RE);
-    if (imgMatch) {
-      const src = imgMatch[0];
-      // strip image URL from text, show remainder + image
-      const rest = raw.replace(src, '').trim();
-      const restHtml = rest ? `<div>${C.escapeHtml(rest)}</div>` : '';
-      return `${restHtml}<img src="${C.escapeHtml(src)}" alt="gif" loading="lazy" />`;
-    }
-    // linkify
-    return escaped.replace(URL_RE, (u) => {
+  function linkify(raw) {
+    return C.escapeHtml(raw).replace(URL_RE, (u) => {
       const safe = C.escapeHtml(u);
       return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${safe}</a>`;
     });
+  }
+
+  function renderText(raw, imageUrl) {
+    if (imageUrl) {
+      const rest = raw.replace(imageUrl, '').trim();
+      const restHtml = rest ? `<div>${linkify(rest)}</div>` : '';
+      return `${restHtml}<img src="${C.escapeHtml(imageUrl)}" alt="image" loading="lazy" />`;
+    }
+    return linkify(raw);
   }
 
   // ==================== PUBLIC MESSAGES ====================
@@ -65,7 +63,7 @@
     const canDelete = !m.deleted && (isMine || state.me?.role === 'admin');
 
     el.className = 'msg' + (m.deleted ? ' deleted' : '');
-    const text = m.deleted ? '(deleted)' : renderText(m.text);
+    const text = m.deleted ? '(deleted)' : renderText(m.text, m.image_url);
     const edited = m.edited_at && !m.deleted ? '<span class="meta">(edited)</span>' : '';
 
     el.innerHTML = `
@@ -79,7 +77,6 @@
       ${!m.deleted ? '<div class="react-picker"></div>' : ''}
     `;
 
-    // tools
     const tools = el.querySelector('.tools');
     if (canEdit) {
       const b = document.createElement('button');
@@ -98,10 +95,8 @@
       tools.appendChild(b);
     }
 
-    // reactions render
     renderReactions(el.querySelector('.reactions'), m);
 
-    // react picker
     const picker = el.querySelector('.react-picker');
     if (picker) {
       C.REACTIONS.forEach(e => {
@@ -118,7 +113,6 @@
   function renderReactions(container, m) {
     container.innerHTML = '';
     if (!m.reactions || !m.reactions.length) return;
-    // group by emoji
     const groups = new Map();
     for (const r of m.reactions) {
       if (!groups.has(r.emoji)) groups.set(r.emoji, []);
@@ -166,7 +160,7 @@
       refs.dmThread.appendChild(el);
     }
     el.className = 'dm' + (m.from_id === state.me.id ? ' out' : '') + (m.deleted ? ' deleted' : '');
-    const text = m.deleted ? '(deleted)' : renderText(m.text);
+    const text = m.deleted ? '(deleted)' : renderText(m.text, m.image_url);
     const edited = m.edited_at && !m.deleted ? '<span class="meta">(edited)</span>' : '';
     const canEdit = m.from_id === state.me.id && !m.deleted;
     const canDelete = !m.deleted && (m.from_id === state.me.id || state.me.role === 'admin');
@@ -204,7 +198,6 @@
     C.renderUsers([...state.profiles.values()]);
     C.renderThreads();
 
-    // mark read on server
     C.apiFetch('/api/dm/read', { peer: userId }).catch(() => {});
 
     refs.app.classList.remove('nodm');
@@ -286,7 +279,6 @@
       refs.threadsEl.appendChild(li);
       return;
     }
-    // sort by most recent message
     const lastTs = (id) => {
       let max = 0;
       for (const d of state.dms.values()) {
@@ -329,7 +321,6 @@
     const input = refs.textInput;
     const value = input.value;
     const caret = input.selectionStart;
-    // find the @ that starts this mention
     let i = caret - 1;
     while (i >= 0 && /[A-Za-z0-9_.-]/.test(value[i])) i--;
     if (i < 0 || value[i] !== '@') { closeMention(); return; }
@@ -356,7 +347,6 @@
       popup.appendChild(d);
     });
 
-    // position under the input
     const rect = input.getBoundingClientRect();
     popup.style.left = rect.left + 'px';
     popup.style.top = (rect.top - 8) + 'px';
