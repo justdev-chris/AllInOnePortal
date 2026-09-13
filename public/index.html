@@ -4,6 +4,23 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Chatroom</title>
+<script>
+  (function () {
+    try {
+      var t = localStorage.getItem('theme') || 'dark';
+      var resolved = t;
+      if (t === 'system') {
+        resolved = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      }
+      document.documentElement.classList.add('theme-' + resolved);
+      var img = localStorage.getItem('themeImage');
+      if (img) {
+        document.documentElement.classList.add('has-theme-image');
+        document.documentElement.style.setProperty('--theme-image', 'url("' + img.replace(/"/g, '\\"') + '")');
+      }
+    } catch (e) {}
+  })();
+</script>
 <link rel="stylesheet" href="/css/base.css" />
 <link rel="stylesheet" href="/css/chat.css" />
 </head>
@@ -39,9 +56,12 @@
       <span id="slowBadge" class="hidden" title="Slow mode is on">🐌 <span id="slowSeconds"></span></span>
       <span id="status">connecting…</span>
       <a id="adminLink" href="/admin.html" class="hidden">admin</a>
+      <button id="soundToggle" title="Sound board">🔊</button>
       <button id="profileBtn">profile</button>
       <button id="logout">Log out</button>
     </header>
+
+    <div id="announceBanner" class="hidden"></div>
 
     <div id="muteBanner" class="hidden">
       You are muted from the public chat.
@@ -102,11 +122,16 @@
 <!-- quick admin context menu -->
 <div id="userMenu" class="hidden"></div>
 
+<!-- sound board -->
+<div id="soundPanel" class="hidden"></div>
+
 <!-- toasts -->
 <div id="toasts"></div>
 
 <script src="/js/core.js" defer></script>
 <script src="/js/chat.js" defer></script>
 <script src="/js/profile.js" defer></script>
+<script src="/js/theme.js" defer></script>
+<script src="/js/sound.js" defer></script>
 </body>
 </html>
