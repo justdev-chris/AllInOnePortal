@@ -40,9 +40,35 @@
     if (imageUrl) {
       const rest = raw.replace(imageUrl, '').trim();
       const restHtml = rest ? `<div>${linkify(rest)}</div>` : '';
-      return `${restHtml}<img src="${C.escapeHtml(imageUrl)}" alt="image" loading="lazy" />`;
+      const safe = C.escapeHtml(imageUrl);
+      return `${restHtml}<img src="${safe}" alt="image" loading="lazy" data-full="${safe}" />`;
     }
     return linkify(raw);
+  }
+
+  // ==================== LIGHTBOX ====================
+  function openLightbox(src) {
+    let lb = document.getElementById('lightbox');
+    if (!lb) {
+      lb = document.createElement('div');
+      lb.id = 'lightbox';
+      lb.onclick = () => lb.remove();
+      document.body.appendChild(lb);
+    }
+    lb.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = src;
+    lb.appendChild(img);
+  }
+  C.openLightbox = openLightbox;
+
+  function wireImageClick(el) {
+    el.querySelectorAll('img[data-full]').forEach(img => {
+      img.onclick = (e) => {
+        e.stopPropagation();
+        openLightbox(img.dataset.full);
+      };
+    });
   }
 
   // ==================== PUBLIC MESSAGES ====================
@@ -96,6 +122,7 @@
     }
 
     renderReactions(el.querySelector('.reactions'), m);
+    wireImageClick(el);
 
     const picker = el.querySelector('.react-picker');
     if (picker) {
@@ -188,6 +215,7 @@
       };
       tools.appendChild(b);
     }
+    wireImageClick(el);
     refs.dmThread.scrollTop = refs.dmThread.scrollHeight;
   };
 
@@ -249,7 +277,7 @@
       .sort((a, b) => a.username.localeCompare(b.username))
       .forEach(u => {
         const li = document.createElement('li');
-        const meTag = u.id === state.me?.id ? ' <span style="color:#8b8f99;font-size:12px">(you)</span>' : '';
+        const meTag = u.id === state.me?.id ? ' <span style="color:var(--text-dim);font-size:12px">(you)</span>' : '';
         const adminTag = u.role === 'admin' ? '<span class="admin">admin</span>' : '';
         const n = state.unread.get(u.id) || 0;
         const badge = n ? ` <span class="badge">${n}</span>` : '';
@@ -273,7 +301,7 @@
     const ids = [...state.threads];
     if (!ids.length) {
       const li = document.createElement('li');
-      li.style.color = '#565b66';
+      li.style.color = 'var(--text-dimmer)';
       li.style.fontSize = '12px';
       li.textContent = 'no DMs yet';
       refs.threadsEl.appendChild(li);
