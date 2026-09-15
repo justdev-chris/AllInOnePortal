@@ -2,6 +2,8 @@ name: Host Chatroom & Eaglercraft Public Server
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
 
 concurrency:
   group: chatroom-host
