@@ -138,6 +138,13 @@ function ensureAdminUser() {
 }
 ensureAdminUser();
 
+// founder = the account named by ADMIN_USERNAME. Untouchable by other admins.
+function isFounder(user) {
+  if (!user) return false;
+  if (!ADMIN_USERNAME) return false;
+  return user.username === ADMIN_USERNAME;
+}
+
 // ==================== SOCKET SERVER ====================
 const socketApi = attachSocketServer(server, db);
 const { broadcast, sendTo, onlineUsers, broadcastUserList, userSockets, sockets } = socketApi;
@@ -360,6 +367,7 @@ app.post('/api/admin/ban', requireAdmin, (req, res) => {
   if (id === req.admin.id) return res.status(400).json({ error: 'Cannot ban yourself' });
   const target = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   if (!target) return res.status(404).json({ error: 'No such user' });
+  if (isFounder(target)) return res.status(403).json({ error: 'Cannot action the founder' });
 
   db.prepare('UPDATE users SET banned = ? WHERE id = ?').run(banned, id);
   if (banned) {
@@ -379,6 +387,13 @@ app.post('/api/admin/promote', requireAdmin, (req, res) => {
   if (id === req.admin.id) return res.status(400).json({ error: 'Cannot change your own role' });
   const target = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   if (!target) return res.status(404).json({ error: 'No such user' });
+  if (isFounder(target)) return res.status(403).json({ error: 'Cannot action the founder' });
+
+  // Only the founder can demote an admin. Regular admins can promote, but not demote.
+  if (role === 'user' && target.role === 'admin' && !isFounder(req.admin)) {
+    return res.status(403).json({ error: 'Only the founder can demote admins' });
+  }
+
   db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, id);
   for (const info of sockets.values()) {
     if (info.userId === id) info.role = role;
@@ -396,6 +411,7 @@ app.post('/api/admin/mute', requireAdmin, (req, res) => {
   if (id === req.admin.id) return res.status(400).json({ error: 'Cannot mute yourself' });
   const target = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   if (!target) return res.status(404).json({ error: 'No such user' });
+  if (isFounder(target)) return res.status(403).json({ error: 'Cannot action the founder' });
 
   let until = 0;
   let action = 'unmute';
@@ -472,6 +488,17 @@ app.post('/api/admin/announce/clear', requireAdmin, (req, res) => {
   audit(req.admin, 'announce-clear', null, null);
   broadcast({ type: 'announcement', announcement: null });
   res.json({ ok: true });
+});
+
+app.get('/api/admin/announce-current', requireAdmin, (req, res) => {
+  const raw = getSetting('announcement', '');
+  if (!raw) return res.json({ announcement: null });
+  try {
+    const a = JSON.parse(raw);
+    res.json({ announcement: a });
+  } catch {
+    res.json({ announcement: null });
+  }
 });
 
 app.get('/api/admin/audit', requireAdmin, (req, res) => {
